@@ -1,0 +1,33 @@
+continue all nexts
+
+Backend Integration: Connect to Lovable Cloud for real data storage and authentication
+QR Code Generation: Add actual QR code creation and scanning
+AI Features: Integrate emotion analysis and smart recommendations
+Advanced Features: Add student management, book management modules
+
+and register me as an admin
+
+First Name: Jhon Mark 
+Middle Name: Amaca
+Surname: Suico
+Suffix: None
+Gender: Male
+Birthday: 02/20/2004
+Age: 21
+Admin ID: KCL-00001
+Position/Role: Librarian
+Address Information
+Street: Purok 3
+Barangay: Barangay Dos
+Municipality: Katipunan
+Province: Zamboanga Del Norte
+Country: Philippines
+Zip code: 7109
+
+same permanent address
+
+Contact Number: 09468861751
+Email Address: suicojm99@gmail.com
+
+Password: Freedom@9999
+

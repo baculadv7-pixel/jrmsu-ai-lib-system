@@ -1,0 +1,608 @@
+
+
+
+
+these is your project to do (continue doing this and always stick to plan of the instructions) even i reach the quota limits, just continue after i refresh and dont lost focus on the instructions
+
+i want his project so badly so make it.
+
+__________________________________________________________________________
+
+🧠 FINAL FULL AI PROMPT COMMAND
+
+(For JRMSU AI-Library System Website — Desktop / Mobile)
+
+PROMPT START
+
+You are an AI Developer Assistant.
+Create a JRMSU AI-Library System Website — a unified digital library management software designed for Desktop, Web, and Mobile.
+Follow all modules, features, and design details strictly as listed below.
+Do not skip, shorten, or change any part. Maintain full accuracy of every section, label, field, and rule.
+
+📚 Project Overview
+
+Develop a JRMSU AI-Library System Website — a modern, smart, and user-friendly library system that supports student and admin logins, AI assistance, QR authentication, and real-time system management.
+The system must support both manual and AI-powered operations, with an interactive GUI and emotion-aware assistance.
+
+
+Develop a secure, responsive, and AI-enhanced Library Management Website using:
+Frontend: HTML, CSS, JavaScript (ReactJS optional)
+Backend: Node.js (Express.js)
+Database: MySQL (XAMPP for localhost)
+AI & Authentication: Python (Flask API / TensorFlow /
+
+
+🔐 LOGIN & SIGN-IN PAGE
+
+Initial selection screen with a toggle or button option:
+Student | Admin
+
+Login Options:
+
+QR Code Login
+
+Manual Login (ID & Password)
+
+2FA Login (if activated)
+
+Fields:
+
+ID: ____________
+PASSWORD: ____________ Eye button (visible/notvisible)
+
+
+Add "Forgot Password?"
+
+Alternative ways to request a password change:
+
+Request a code via email (Gmail / Yahoo / Outlook).
+
+Request assistance from the admin.
+
+Use a 2FA authentication code to change the password.
+
+All password reset actions must notify both the admin and the student (if the student successfully changes the password and accesses the dashboard).
+
+After first login: Option: “Trust this device for future logins.” Answer: Yes, always / No, maybe later
+
+Login and Sign-Up must validate through a secure database connection.
+Display system title: “JRMSU AI-Library System” at the top.
+
+
+
+
+🧾 ADMIN REGISTRATION MODULE
+
+Admin registration form must include:
+
+Full Name (Firstname, Middlename, Surname) (Suffix optional: Jr., Sr., I, II, III, etc.)
+
+Gender / Age / Birthdate
+
+Current Address: Street, Barangay, Municipality, Province, Country, Zip Code
+
+Permanent Address: Street & Barangay optional + explanation field (e.g., near the church, in front of a sari-sari store)
+
+Admin ID (unique, editable only by root admin)
+
+Admin ID: KCL-00045 (KCL = Katipunan Campus Library)
+
+Validation: Only Admin IDs with “KCL-” + 5-digit number allowed.
+
+Email Address
+
+Contact Number
+
+Position / Role
+
+Password and Confirm Password
+
+Admin can log in using Admin ID and Password.
+Auto-generate QR Code and 2FA Setup Key upon registration.
+Admin can view, edit, or deactivate other admin accounts (root-only).
+
+
+
+
+🧑‍🎓 STUDENT REGISTRATION MODULE
+
+Fields include:
+
+Full Name (Firstname, Middlename, Surname) (Suffix optional: Jr., Sr., I, II, III, etc.)
+
+Student ID (Admin-editable only)
+
+For Student Registration, enforce this Student ID rule: format = KC-23-A-00243  
+→ Always auto-display "KC-" in the Student ID input field by default.  
+→ Allow editing only the Block (A/B/C/D) and numeric part after “KC-”.
+Do not alter or skip this rule.
+
+Course & Year (editable by students for shifting/irregular cases)
+
+College Department (required, shown on dashboard, editable)
+
+Gender / Age / Birthdate
+
+Current Address: Street, Barangay, Municipality, Province, Country, Zip Code
+
+Permanent Address: Street & Barangay optional + explanation field (e.g., near the church, in front of a sari-sari store)
+
+Contact Information
+
+Editing Rules:
+
+Students can edit only address & contact info.
+
+Name and Student ID are restricted to Admin.
+
+Course, Year, and Department remain editable by students.
+
+UI Design:
+
+Scrollable form layout.
+
+Scroll buttons & database-like navigation (Next/Previous, Show 10/25/50/100 records).
+
+Consistent JRMSU academic theme.
+
+
+
+
+BORROWING SYSTEM
+
+Only logged-in users can borrow books.
+
+Borrow requests alert Admin.
+
+Users must scan book QR code to validate borrowing.
+
+Borrowing rules:
+• Max 7 days (excluding Saturday/Sunday).
+• Automatic return schedule calculation.
+
+Wrong or overdue returns trigger notifications to user & Admin.
+
+
+
+
+
+🆔 AUTHENTICATION & QR CODE SYSTEM
+
+QR Code for Library Login:
+
+Unique per student or admin.
+
+Downloadable from profile.
+
+Regenerable if lost (admin permission required).
+
+Alternative Login (without QR):
+
+Real-time system-generated code.
+
+Authentication App for generating real-time codes.
+
+2FA setup key stored securely.
+
+Admin Access Control:
+
+Admin can enable or disable 2FA globally.
+
+Admin can view or download all student QR Codes.
+
+Each user has dynamic QR code storing: full registration data + unique 2FA setup key.
+
+
+
+
+
+📖 LIBRARY CIRCULATION & INVENTORY MODULE
+
+Admin Functions:
+
+Add / Edit / Remove Books
+
+Manage Borrowing / Returning Records
+
+View borrowing statistics and trends
+
+
+
+
+System Analytics:
+
+Display how many students borrowed specific books.
+
+Sort borrowing history:
+
+Latest (ascending/descending)
+
+Alphabetical
+
+Time-based
+
+By Department
+
+By Course
+
+
+
+
+Database Display for Books:
+
+Scrollable table format with school-style navigation buttons.
+
+Columns include:
+
+Book ID
+
+Title
+
+Author
+
+QR Code and Number
+
+Borrower
+
+Date Borrowed
+
+Return Status (restricted from removal)
+
+(Add new columns or remove unrestricted columns if needed.)
+
+
+
+
+🔎 AI-POWERED SEARCH BAR
+
+Smart, predictive search that:
+
+Auto-completes as the user types.
+
+Suggests books or authors instantly.
+
+Displays brief details (title, author, category, availability).
+
+Accepts voice input and image input for searching references.
+
+Allows QR scan for specific book lookup.
+
+
+
+
+💬 FLOATING AI ASSISTANT
+
+Floating AI bubble in the bottom-right corner of the screen.
+
+Functions:
+
+Chat-style help.
+
+“Ask Anything” mode for book inquiries.
+
+“View History” tab for previous chats.
+
+Emotion analysis for better user support.
+
+Responds with empathy and friendly tone.
+
+Can analyze mood (e.g., stress, confusion, frustration).
+
+Suggests book genres or study topics based on detected emotion.
+
+For admins: Provides system tips, report summaries, and quick actions.
+
+
+
+
+🔔 NOTIFICATION BELL & MESSAGE BOX
+
+Bell icon (top-right corner) accessible for both students and admins.
+
+Opens a notification/message box, not just a visual indicator.
+
+Displays:
+
+Borrowing reminders
+
+Return deadlines
+
+Account updates
+
+AI recommendations (optional)
+
+Includes mark-as-read and delete notification options.
+
+Notifications stored in the database for logging.
+
+Real-time alerts via WebSockets:
+• New registrations
+• Borrowed/returned books
+• Overdue alerts
+• Authentication/system warnings
+
+Option to mark notifications as read.
+
+
+
+
+
+🧭 NAVIGATION BAR
+For Admin:
+
+Sections:
+
+Dashboard
+
+Book Inventory
+
+Borrow/Return History
+
+Notification Bell Box (top-right)
+
+Student Management (Admin only)
+
+Book Management (Admin only)
+
+Reports (PDF/Excel export, late returns, borrow counts)
+
+Authentication and 2FA Settings (On/Off toggle)
+
+Profile (All registered info: editable + non-editable)
+
+Auto-generate QR Code and 2FA setup key
+
+Floating AI Assistant
+
+Logout
+
+
+
+For Students:
+
+Sections:
+
+Dashboard
+
+Book Inventory
+
+System analytics: borrow counts, time-based, alphabetical, department/course sorting.
+
+Borrow/Return History
+
+Reports (PDF/Excel export, late returns, borrow counts)
+
+Authentication and 2FA Settings (On/Off toggle)
+
+Profile (All registered info: editable + non-editable)
+
+Generate QR Code and 2FA setup key
+
+Notification Bell Box (top-right)
+
+Floating AI Assistant
+
+
+
+
+🎨 SYSTEM DESIGN & GUI
+
+Professional JRMSU-style interface.
+
+Consistent color scheme and clean typography.
+
+Smooth scrollable pages.
+
+Database-style school buttons for pagination.
+
+Dashboard with visual analytics (charts, borrowing counts, overdue rates).
+
+Responsive layout for desktop, web, and mobile.
+
+Floating AI assistant visible across all screens.
+
+Scrollbars, animations, and buttons must follow school-based design standards.
+
+
+
+
+🤖 EMOTION ANALYSIS (AI-POWERED)
+
+Integrate an emotion analysis module for improved user interaction.
+
+AI detects user emotion through:
+
+Text tone in queries.
+
+Facial expressions via webcam (optional setting).
+
+Interaction speed and frequency.
+
+Based on detected emotion, AI assistant adjusts:
+
+Tone (formal, comforting, energetic)
+
+Suggested books (e.g., motivational when stressed)
+
+Offers empathetic responses like “How can I help you today?”
+
+All data is stored anonymously (no personal identity recorded).
+
+
+
+
+⚙️ SYSTEM BEHAVIOR
+
+Admin and Student Dashboards load relevant widgets dynamically.
+
+Real-time updates for borrowing, returning, and overdue notifications.
+
+Authentication works across devices (web, desktop, mobile).
+
+Supports offline sync mode for local data caching.
+
+Includes system logs for admin tracking.
+
+✅ Secure login via QR / username-password
+✅ Optional Two-Factor Authentication
+✅ Dynamic QR codes for users & books
+✅ Real-time Notification Bell (WebSocket)
+✅ Borrowing System (7-day limit)
+✅ Password Recovery via Email / Authentication Code
+✅  AI assistant (adaptive)
+✅ Admin Dashboard with alerts & analytics
+✅ AI detects
+✅ Scrollable forms + school-style database buttons
+✅ QR code generator & auto-update for edited profiles
+✅ Book reservation system with admin approval
+
+
+
+
+💾 DATA EXPORT & REPORTS
+
+Admin can generate:
+
+Borrow/Return Summary Report
+
+Overdue and Fines Report
+
+Student Activity Report
+
+Inventory Report
+
+Export Options:
+
+PDF
+
+Excel (XLSX)
+
+Include filters for Department, Course, and Date Range.
+
+PROMPT END
+
+
+
+🧩 DATABASE DESIGN (XAMPP MySQL)
+
+Database Name: library_system_ai
+
+Tables:
+
+users
+Column	Type	Description
+id	INT	Primary Key
+role	ENUM('admin','student')	User type
+user_id	VARCHAR(50)	Student/Admin ID
+full_name	VARCHAR(100)	
+age	INT	
+birthdate	DATE	
+email	VARCHAR(100)	
+contact	VARCHAR(15)	
+address	VARCHAR(200)	
+password	VARCHAR(255)	Encrypted
+qr_code	TEXT	Base64 QR code
+auth_key	VARCHAR(255)	2FA setup key
+two_factor_enabled	BOOLEAN	
+created_at	TIMESTAMP	
+books
+Column	Type	Description
+id	INT	Primary Key
+title	VARCHAR(200)	
+author	VARCHAR(150)	
+category	VARCHAR(100)	
+shelf	VARCHAR(50)	
+status	ENUM('available','borrowed')	
+qr_code	TEXT	Book QR data
+borrow_history
+Column	Type	Description
+id	INT	Primary Key
+student_id	VARCHAR(50)	FK to users
+book_id	INT	FK to books
+borrow_date	DATE	
+due_date	DATE	
+return_date	DATE	nullable
+status	ENUM('borrowed','returned','overdue')	
+remarks	TEXT	
+notifications
+Column	Type	Description
+id	INT	Primary Key
+receiver_id	VARCHAR(50)	user_id FK
+message	TEXT	
+type	VARCHAR(50)	(overdue, warning, etc.)
+status	ENUM('unread','read')	
+created_at	TIMESTAMP	
+ai_logs
+Column	Type	Description
+id	INT	Primary Key
+user_id	VARCHAR(50)	
+message	TEXT	
+ai_response	TEXT	
+emotion_detected	VARCHAR(50)	
+created_at	TIMESTAMP	
+auth_codes
+Column	Type	Description
+id	INT	Primary Key
+user_id	VARCHAR(50)	
+code	VARCHAR(10)	
+expires_at	DATETIME	
+used	BOOLEAN	
+🧠 AI REQUIREMENTS
+
+
+
+
+=========================================
+FRONTEND REQUIREMENTS
+=========================================
+
+Responsive UI (Bootstrap / Tailwind).
+
+Login, Register, Dashboard, Borrowing Page.
+
+Admin Panel: charts for borrowed books, users, emotional insights.
+
+AI Assistant chat bubble (bottom right).
+
+Display emotion icon beside profile.
+
+Notification Bell with dropdown alerts.
+
+2FA code section in Dashboard.
+
+=========================================
+BACKEND REQUIREMENTS
+=========================================
+
+Node.js + Express.js
+
+RESTful APIs: /auth, /books, /notifications, /emotion, /admin
+
+JWT authentication
+
+MySQL (XAMPP localhost)
+
+WebSockets (Socket.IO)
+
+
+
+
+
+Python libraries:
+
+opencv-python
+pyzbar
+pyqrcode
+pyauthenticator
+smtplib
+mysql-connector-python
+pyttsx3
+transformers
+torch
+textblob
+pillow
+requests
+cryptography
+reportlab
+openpyxl
+
