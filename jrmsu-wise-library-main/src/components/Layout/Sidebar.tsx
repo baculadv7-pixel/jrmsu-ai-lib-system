@@ -20,7 +20,6 @@ const Sidebar = ({ userType }: SidebarProps) => {
     { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
     { icon: BookOpen, label: "Book Inventory", path: "/books" },
     { icon: History, label: "Borrow History", path: "/history" },
-    { icon: FileText, label: "Reports", path: "/reports" },
     { icon: Settings, label: "2FA Settings", path: "/settings" },
     { icon: User, label: "Profile", path: "/profile" },
   ];

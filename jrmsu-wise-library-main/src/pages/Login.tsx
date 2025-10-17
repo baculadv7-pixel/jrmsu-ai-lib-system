@@ -9,6 +9,7 @@ import { Eye, EyeOff, QrCode } from "lucide-react";
 import logo from "@/assets/jrmsu-logo.jpg";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { SimpleQRCodeLogin } from "@/components/auth/SimpleQRCodeLogin";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -237,16 +238,10 @@ const Login = () => {
               </p>
             </form>
           ) : (
-            <div className="py-8 text-center space-y-4">
-              <div className="flex justify-center">
-                <div className="h-48 w-48 bg-muted rounded-lg flex items-center justify-center">
-                  <QrCode className="h-24 w-24 text-muted-foreground" />
-                </div>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Scan your QR code to login
-              </p>
-            </div>
+            <SimpleQRCodeLogin 
+              onBackToManual={() => setLoginMethod("manual")}
+              onLoginSuccess={() => navigate("/dashboard")}
+            />
           )}
         </CardContent>
       </Card>

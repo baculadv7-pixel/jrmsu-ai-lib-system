@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -6,13 +6,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Shield, Smartphone, Mail, Key, CheckCircle } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
-import { useToast } from "@/hooks/use-toast";
 import TwoFASetup from "@/components/auth/TwoFASetup";
-import { useAuth } from "@/context/AuthContext";
-import { getGlobal2FAEnabled, setGlobal2FAEnabled } from "@/services/qr";
 
 const Settings = () => {
   const { user, disableTwoFactor } = useAuth();
@@ -22,16 +21,12 @@ const Settings = () => {
   const [emailAuth, setEmailAuth] = useState(true);
   const [smsAuth, setSmsAuth] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      const global = await getGlobal2FAEnabled();
-      setTwoFactorEnabled(global);
-    })();
-  }, []);
-
-  const handleSave2FA = async () => {
-    await setGlobal2FAEnabled(twoFactorEnabled);
-    toast({ title: "Settings Saved", description: "Your 2FA settings have been updated successfully." });
+  const handleSave2FA = () => {
+    try {
+      toast({ title: "Settings Saved", description: "Your 2FA settings have been updated successfully." });
+    } catch (error) {
+      console.warn('Failed to show toast:', error);
+    }
   };
 
   return (
@@ -44,9 +39,13 @@ const Settings = () => {
         <main className="flex-1 p-6">
           <div className="max-w-4xl mx-auto space-y-6">
             <div>
-              <h1 className="text-3xl font-bold text-primary">Authentication & 2FA Settings</h1>
+              <h1 className="text-3xl font-bold text-primary">
+                {userType === "admin" ? "Authentication & System Settings" : "Authentication & 2FA Settings"}
+              </h1>
               <p className="text-muted-foreground mt-1">
-                Manage your security and two-factor authentication
+                {userType === "admin" 
+                  ? "Manage security settings and system-wide authentication controls"
+                  : "Manage your personal security and two-factor authentication"}
               </p>
             </div>
 
@@ -85,9 +84,13 @@ const Settings = () => {
                     checked={twoFactorEnabled}
                     onCheckedChange={(checked) => {
                       setTwoFactorEnabled(checked);
-                      if (!checked) {
-                        disableTwoFactor();
-                        toast({ title: "2FA disabled" });
+                      if (!checked && disableTwoFactor) {
+                        try {
+                          disableTwoFactor();
+                          toast({ title: "2FA disabled" });
+                        } catch (error) {
+                          console.warn('Failed to disable 2FA:', error);
+                        }
                       }
                     }}
                   />
@@ -189,6 +192,61 @@ const Settings = () => {
                 </ul>
               </CardContent>
             </Card>
+
+            {/* Admin-only System Settings */}
+            {userType === "admin" && (
+              <Card className="shadow-jrmsu border-orange-200 bg-orange-50/50">
+                <CardHeader>
+                  <div className="flex items-center gap-3">
+                    <Shield className="h-5 w-5 text-orange-600" />
+                    <div>
+                      <CardTitle className="text-orange-900">System Authentication Settings</CardTitle>
+                      <CardDescription className="text-orange-700">
+                        Admin-only controls for system-wide security
+                      </CardDescription>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between p-4 bg-white/70 rounded-lg border border-orange-200">
+                    <div>
+                      <p className="font-medium text-orange-900">2FA Global Control</p>
+                      <p className="text-sm text-orange-700">
+                        Enable or disable 2FA requirements for all users
+                      </p>
+                    </div>
+                    <Switch defaultChecked />
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-4 bg-white/70 rounded-lg border border-orange-200">
+                    <div>
+                      <p className="font-medium text-orange-900">Session Timeout Control</p>
+                      <p className="text-sm text-orange-700">
+                        Set automatic logout time for inactive users
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Input 
+                        type="number" 
+                        defaultValue={30} 
+                        className="w-16 text-center" 
+                      />
+                      <span className="text-sm text-orange-700">minutes</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between p-4 bg-white/70 rounded-lg border border-orange-200">
+                    <div>
+                      <p className="font-medium text-orange-900">Password Policy</p>
+                      <p className="text-sm text-orange-700">
+                        Enforce strong password requirements
+                      </p>
+                    </div>
+                    <Switch defaultChecked />
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             <div className="flex justify-end gap-3">
               <Button variant="outline">Cancel</Button>

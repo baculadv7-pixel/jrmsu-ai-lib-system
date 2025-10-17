@@ -8,39 +8,72 @@ import AIAssistant from "@/components/Layout/AIAssistant";
 import QRCodeDisplay, { downloadCanvasAsPng } from "@/components/qr/QRCodeDisplay";
 import { useEffect, useRef, useState } from "react";
 import { generateUserQR } from "@/services/qr";
+import { useAuth } from "@/context/AuthContext";
 
 const Profile = () => {
-  const userType: "student" | "admin" = "admin";
+  const { user } = useAuth();
+  const userType = user?.role || "student";
   const [qrEnvelope, setQrEnvelope] = useState<string>("");
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    (async () => {
-      const resp = await generateUserQR({ userId: "demo-user" });
-      setQrEnvelope(resp.envelope);
-    })();
-  }, []);
+    if (user?.id) {
+      (async () => {
+        const resp = await generateUserQR({ userId: user.id });
+        setQrEnvelope(resp.envelope);
+      })();
+    }
+  }, [user?.id]);
 
-  // TODO: Replace with actual user data from First_Admin_Info.txt
-  const userData = {
-    firstName: "Jhon Mark",
-    middleName: "Amaca",
-    surname: "Suico",
-    suffix: "",
-    gender: "Male",
-    birthday: "02/20/2004",
-    age: 21,
-    adminId: "KCL-00001",
-    position: "Librarian",
-    street: "Purok 3",
-    barangay: "Barangay Dos",
-    municipality: "Katipunan",
-    province: "Zamboanga Del Norte",
-    country: "Philippines",
-    zipCode: "7109",
-    contact: "09468861751",
-    email: "suicojm99@gmail.com",
+  // Mock user data based on role - replace with actual API call
+  const getUserData = () => {
+    if (userType === "admin") {
+      return {
+        firstName: "Jhon Mark",
+        middleName: "Amaca",
+        surname: "Suico",
+        suffix: "",
+        gender: "Male",
+        birthday: "02/20/2004",
+        age: 21,
+        id: user?.id || "KCL-00001",
+        position: "Librarian",
+        street: "Purok 3",
+        barangay: "Barangay Dos",
+        municipality: "Katipunan",
+        province: "Zamboanga Del Norte",
+        country: "Philippines",
+        zipCode: "7109",
+        contact: "09468861751",
+        email: "suicojm99@gmail.com",
+      };
+    } else {
+      return {
+        firstName: "Maria Isabel",
+        middleName: "Santos",
+        surname: "Rodriguez",
+        suffix: "",
+        gender: "Female",
+        birthday: "05/15/2002",
+        age: 22,
+        id: user?.id || "2024-12345",
+        department: "College of Computer Science",
+        course: "Bachelor of Science in Information Technology",
+        yearLevel: "3rd Year",
+        block: "A",
+        street: "123 Main Street",
+        barangay: "Barangay Central",
+        municipality: "Dipolog City",
+        province: "Zamboanga Del Norte",
+        country: "Philippines",
+        zipCode: "7100",
+        contact: "09123456789",
+        email: "maria.rodriguez@jrmsu.edu.ph",
+      };
+    }
   };
+
+  const userData = getUserData();
 
   return (
     <div className="min-h-screen bg-background">
@@ -130,7 +163,7 @@ const Profile = () => {
                       <p className="text-sm font-medium text-muted-foreground">
                         {userType === "admin" ? "Admin ID" : "Student ID"}
                       </p>
-                      <p className="font-medium">{userData.adminId}</p>
+                      <p className="font-medium">{userData.id}</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-muted-foreground">Gender</p>
@@ -144,14 +177,50 @@ const Profile = () => {
                       <p className="text-sm font-medium text-muted-foreground">Birthday</p>
                       <p className="font-medium">{userData.birthday}</p>
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-muted-foreground">Position</p>
-                      <p className="font-medium">{userData.position}</p>
-                    </div>
+                    {userType === "admin" ? (
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Position</p>
+                        <p className="font-medium">{(userData as any).position}</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <p className="text-sm font-medium text-muted-foreground">Year Level</p>
+                        <p className="font-medium">{(userData as any).yearLevel}</p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
             </div>
+
+            {/* Student-specific Information */}
+            {userType === "student" && (
+              <Card className="shadow-jrmsu">
+                <CardHeader>
+                  <CardTitle>Academic Information</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Department</p>
+                      <p className="font-medium">{(userData as any).department}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Course</p>
+                      <p className="font-medium">{(userData as any).course}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Year Level</p>
+                      <p className="font-medium">{(userData as any).yearLevel}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-muted-foreground">Block</p>
+                      <p className="font-medium">{(userData as any).block}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Contact Information */}
             <Card className="shadow-jrmsu">

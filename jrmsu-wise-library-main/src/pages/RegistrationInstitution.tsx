@@ -1,11 +1,12 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { useRegistration } from "@/context/RegistrationContext";
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import { NavigationProgress } from "@/components/ui/navigation-progress";
 
 const RegistrationInstitution = () => {
   const navigate = useNavigate();
@@ -14,13 +15,15 @@ const RegistrationInstitution = () => {
   const isStudent = data.role === "student";
   const adminIdOk = data.role !== "admin" || /^KCL-\d{5}$/.test(data.adminId || "");
   const adminPositionOk = data.role !== "admin" || Boolean((data.position || "").trim());
+  const adminEmailOk = data.role !== "admin" || (data.email?.includes("@") && data.email?.includes(".com"));
+  const adminPhoneOk = data.role !== "admin" || (data.phone && data.phone.length === 11);
   const requiresCourse = data.role === "student" && data.department !== "scje";
   const departmentOk = data.role !== "student" || Boolean(data.department);
-  const courseOk = data.role !== "student" || (requiresCourse ? Boolean(data.course) : true);
+  const courseOk = data.role !== "student" || (data.department === "scje" ? true : Boolean(data.course));
   const yearOk = data.role !== "student" || Boolean(data.yearLevel);
   // IMPORTANT: Per spec, Student ID is admin-editable only; do not block student flow on studentId format here
   const studentRequiredOk = data.role !== "student" || (departmentOk && courseOk && yearOk);
-  const canProceed = isStudent ? studentRequiredOk : (adminIdOk && adminPositionOk);
+  const canProceed = isStudent ? studentRequiredOk : (adminIdOk && adminPositionOk && adminEmailOk && adminPhoneOk);
   const [showErrors, setShowErrors] = useState(false);
   const [sidTouched, setSidTouched] = useState(false);
   const [aidTouched, setAidTouched] = useState(false);
@@ -36,7 +39,11 @@ const RegistrationInstitution = () => {
     <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex items-center justify-center p-6">
       <Card className="w-full max-w-3xl shadow-jrmsu-gold">
         <CardHeader>
-          <CardTitle className="text-2xl text-primary">Phase 3 of 4: Educational / Institutional Information</CardTitle>
+          <NavigationProgress currentStep={3} totalSteps={4} />
+          <CardTitle className="text-2xl text-primary mt-4">Phase 3 of 4: Educational / Institutional Information</CardTitle>
+          <CardDescription>
+            {isStudent ? "Please provide your student details" : "Please provide your administrative details"}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           {isStudent ? (
@@ -53,7 +60,7 @@ const RegistrationInstitution = () => {
                   aria-describedby="sid-help sid-error"
                 />
                 {data.studentId && !/^KC-\d{2}-[A-D]-\d{5}$/.test(data.studentId) && (sidTouched || trailingDigitsCount(data.studentId) >= 5) && (
-                  <p id="sid-error" className="text-xs text-destructive">⚠️ Invalid ID format. Please follow the correct format.</p>
+                  <p id="sid-error" className="text-xs text-destructive">⚠ Invalid ID format.</p>
                 )}
                 <p id="sid-help" className="text-xs text-muted-foreground">Student ID format: KC-23-A-00243</p>
               </div>
@@ -68,33 +75,38 @@ const RegistrationInstitution = () => {
                 >
                   <SelectTrigger id="dept"><SelectValue placeholder="Select department" /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cte">College of Teacher Education</SelectItem>
-                    <SelectItem value="cba">College of Business Administration</SelectItem>
-                    <SelectItem value="cafse">College of Agriculture and Forestry and School of Engineering</SelectItem>
-                    <SelectItem value="scje">School of Criminal Justice Education</SelectItem>
-                    <SelectItem value="ccs">College of Computing Studies</SelectItem>
+                    <SelectItem value="cte">Teacher Education</SelectItem>
+                    <SelectItem value="cba">Business Administration</SelectItem>
+                    <SelectItem value="cafse">Agriculture & Forestry</SelectItem>
+                    <SelectItem value="scje">Criminal Justice Education</SelectItem>
+                    <SelectItem value="ccs">Computing Studies</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="course">Course *</Label>
-                <Select value={data.course} onValueChange={(v) => update({ course: v })}>
-                  <SelectTrigger id="course"><SelectValue placeholder="Select course" /></SelectTrigger>
+                <Label htmlFor="course">Course / Major {data.department === "scje" ? "" : "*"}</Label>
+                <Select 
+                  value={data.course} 
+                  onValueChange={(v) => update({ course: v })}
+                  disabled={data.department === "scje"}
+                >
+                  <SelectTrigger id="course">
+                    <SelectValue placeholder={data.department === "scje" ? "No course required" : "Select course"} />
+                  </SelectTrigger>
                   <SelectContent>
                     {data.department === "cte" && (
                       <>
                         <SelectItem value="bsfil">BS Filipino</SelectItem>
                         <SelectItem value="bssci">BS Science</SelectItem>
-                        <SelectItem value="bssoc">Social Studies</SelectItem>
-                        <SelectItem value="bsee">BS Elementary Education</SelectItem>
-                        <SelectItem value="bsmath">BS Mathematics</SelectItem>
-                        <SelectItem value="bspe">BS Physical Education</SelectItem>
+                        <SelectItem value="bsee">BS Elementary Ed</SelectItem>
+                        <SelectItem value="bsmath">BS Math</SelectItem>
+                        <SelectItem value="bspe">BS PE</SelectItem>
                       </>
                     )}
                     {data.department === "cba" && (
                       <>
                         <SelectItem value="bhm">BS Hospitality Management</SelectItem>
-                        <SelectItem value="bbahrm">BS Business Administration – Human Resource Management</SelectItem>
+                        <SelectItem value="bbahrm">BSBA – HR Management</SelectItem>
                         <SelectItem value="bsab">BS Agri-Business</SelectItem>
                       </>
                     )}
@@ -102,7 +114,7 @@ const RegistrationInstitution = () => {
                       <>
                         <SelectItem value="bsa">BS Agriculture</SelectItem>
                         <SelectItem value="bsf">BS Forestry</SelectItem>
-                        <SelectItem value="bsabe">BS Agricultural and Biosystems Engineering</SelectItem>
+                        <SelectItem value="bsabe">BS Agri & Biosystems Eng.</SelectItem>
                       </>
                     )}
                     {data.department === "scje" && (
@@ -133,26 +145,78 @@ const RegistrationInstitution = () => {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="aid">Admin ID *</Label>
-                <Input
-                  id="aid"
-                  placeholder="KCL-00045"
-                  value={data.adminId || ""}
-                  onChange={(e) => update({ adminId: sanitize(e.target.value) })}
-                  onBlur={() => setAidTouched(true)}
-                  className={(data.adminId && !/^KCL-\d{5}$/.test(data.adminId) && (aidTouched || trailingDigitsCount(data.adminId) >= 5)) ? "border-destructive" : undefined}
-                  aria-describedby="aid-help aid-error"
-                />
-                {data.adminId && !/^KCL-\d{5}$/.test(data.adminId) && (aidTouched || trailingDigitsCount(data.adminId) >= 5) && (
-                  <p id="aid-error" className="text-xs text-destructive">⚠️ Invalid ID format. Please follow the correct format.</p>
-                )}
-                <p id="aid-help" className="text-xs text-muted-foreground">Admin ID format: KCL-00045</p>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="aid">Admin ID *</Label>
+                  <Input
+                    id="aid"
+                    placeholder="KCL-00045"
+                    value={data.adminId || ""}
+                    onChange={(e) => update({ adminId: sanitize(e.target.value) })}
+                    onBlur={() => setAidTouched(true)}
+                    className={(data.adminId && !/^KCL-\d{5}$/.test(data.adminId) && (aidTouched || trailingDigitsCount(data.adminId) >= 5)) ? "border-destructive" : undefined}
+                    aria-describedby="aid-help aid-error"
+                  />
+                  {data.adminId && !/^KCL-\d{5}$/.test(data.adminId) && (aidTouched || trailingDigitsCount(data.adminId) >= 5) && (
+                    <p id="aid-error" className="text-xs text-destructive">⚠ Invalid ID format.</p>
+                  )}
+                  <p id="aid-help" className="text-xs text-muted-foreground">Admin ID format: KCL-00045 (Katipunan Campus Library)</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="pos">Position / Role *</Label>
+                  <Select value={data.position} onValueChange={(value) => update({ position: value })}>
+                    <SelectTrigger id="pos" className={showErrors && !data.position ? "border-destructive" : ""}>
+                      <SelectValue placeholder="Select Position" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="assistant">Assistant</SelectItem>
+                      <SelectItem value="staff">Staff</SelectItem>
+                      <SelectItem value="librarian">Librarian</SelectItem>
+                      <SelectItem value="supervisor">Supervisor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {showErrors && !data.position && (
+                    <p className="text-xs text-destructive">⚠ Please fill in all required (*) fields. These are part of your credentials.</p>
+                  )}
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="pos">Position / Role *</Label>
-                <Input id="pos" placeholder="Librarian" value={data.position || ""} onChange={(e) => update({ position: e.target.value })} />
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="admin-email">Email *</Label>
+                  <Input
+                    id="admin-email"
+                    type="email"
+                    placeholder="admin@example.com"
+                    value={data.email || ""}
+                    onChange={(e) => update({ email: e.target.value })}
+                    className={showErrors && !data.email?.includes("@") ? "border-destructive" : undefined}
+                  />
+                  {showErrors && !data.email?.includes("@") && (
+                    <p className="text-xs text-destructive">⚠ Please fill in all required (*) fields. These are part of your credentials.</p>
+                  )}
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="admin-contact">Contact Number *</Label>
+                  <Input
+                    id="admin-contact"
+                    placeholder="09123456789"
+                    value={data.phone || ""}
+                    onChange={(e) => {
+                      const value = e.target.value.replace(/\D/g, "");
+                      if (value.length <= 11) {
+                        update({ phone: value });
+                      }
+                    }}
+                    className={showErrors && (!data.phone || data.phone.length !== 11) ? "border-destructive" : undefined}
+                  />
+                  {showErrors && (!data.phone || data.phone.length !== 11) && (
+                    <p className="text-xs text-destructive">⚠ Please fill in all required (*) fields. These are part of your credentials.</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">11 digits required</p>
+                </div>
               </div>
             </div>
           )}

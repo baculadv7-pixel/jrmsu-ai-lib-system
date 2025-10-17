@@ -6,7 +6,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
 import Books from "./pages/Books";
-import Profile from "./pages/Profile";
+import EnhancedProfile from "./pages/EnhancedProfile";
+import SecurityDemo from "./pages/SecurityDemo";
 import History from "./pages/History";
 import Reports from "./pages/Reports";
 import AppAdminQRs from "./pages/AppAdminQRs";
@@ -21,7 +22,9 @@ import RegistrationSecurity from "./pages/RegistrationSecurity";
 import NotFound from "./pages/NotFound";
 import { AuthProvider } from "@/context/AuthContext";
 import ProtectedRoute from "@/components/route/ProtectedRoute";
+import { RoleGuard } from "@/components/route/RoleGuard";
 import { RegistrationProvider } from "@/context/RegistrationContext";
+import ErrorBoundary from "@/components/common/ErrorBoundary";
 
 const queryClient = new QueryClient();
 
@@ -35,8 +38,9 @@ const App = () => (
           <RegistrationProvider>
             <Routes>
               <Route path="/" element={<Login />} />
-              {/* Registration wizard */}
+              {/* Registration wizard - 4 separated pages */}
               <Route path="/register" element={<RegistrationSelect />} />
+              <Route path="/register/select" element={<RegistrationSelect />} />
               <Route path="/register/personal" element={<RegistrationPersonal />} />
               <Route path="/register/institution" element={<RegistrationInstitution />} />
               <Route path="/register/security" element={<RegistrationSecurity />} />
@@ -76,8 +80,10 @@ const App = () => (
               <Route
               path="/reports"
               element={
-                <ProtectedRoute allow={["admin"]}>
-                  <Reports />
+                <ProtectedRoute>
+                  <RoleGuard allowedRoles={["admin"]}>
+                    <Reports />
+                  </RoleGuard>
                 </ProtectedRoute>
               }
             />
@@ -85,7 +91,9 @@ const App = () => (
               path="/settings"
               element={
                 <ProtectedRoute>
-                  <Settings />
+                  <ErrorBoundary>
+                    <Settings />
+                  </ErrorBoundary>
                 </ProtectedRoute>
               }
             />
@@ -93,7 +101,7 @@ const App = () => (
               path="/profile"
               element={
                 <ProtectedRoute>
-                  <Profile />
+                  <EnhancedProfile />
                 </ProtectedRoute>
               }
             />
@@ -110,6 +118,14 @@ const App = () => (
               element={
                 <ProtectedRoute allow={["admin"]}>
                   <BookManagement />
+                </ProtectedRoute>
+              }
+            />
+              <Route
+              path="/security-demo"
+              element={
+                <ProtectedRoute>
+                  <SecurityDemo />
                 </ProtectedRoute>
               }
             />

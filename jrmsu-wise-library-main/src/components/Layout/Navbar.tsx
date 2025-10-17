@@ -12,12 +12,15 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useMemo, useState } from "react";
 import { NotificationsService, type AppNotification } from "@/services/notifications";
+import { SettingsDropdown } from "@/components/settings/SettingsDropdown";
 
 interface NavbarProps {
   userType: "student" | "admin";
+  theme?: "light" | "dark" | "system";
+  onThemeChange?: (theme: "light" | "dark" | "system") => void;
 }
 
-const Navbar = ({ userType }: NavbarProps) => {
+const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
   const navigate = useNavigate();
   const { signOut } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -81,6 +84,12 @@ const Navbar = ({ userType }: NavbarProps) => {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            {/* Settings Dropdown */}
+            <SettingsDropdown 
+              theme={theme} 
+              onThemeChange={onThemeChange || (() => {})} 
+            />
 
             {/* Logout Button */}
             <Button

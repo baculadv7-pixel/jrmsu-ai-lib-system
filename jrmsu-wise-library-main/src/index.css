@@ -157,4 +157,13 @@ All colors MUST be HSL.
   .transition-smooth {
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
+  
+  /* Leaf (accent) color utilities */
+  .bg-leaf {
+    background-color: hsl(var(--accent));
+  }
+  
+  .text-leaf {
+    color: hsl(var(--accent));
+  }
 }

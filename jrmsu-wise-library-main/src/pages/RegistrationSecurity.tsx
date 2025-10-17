@@ -1,67 +1,224 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { useNavigate } from "react-router-dom";
 import { useRegistration } from "@/context/RegistrationContext";
 import { useMemo, useState } from "react";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, CheckCircle2, Loader2, QrCode } from "lucide-react";
+import { NavigationProgress } from "@/components/ui/navigation-progress";
+import { toast } from "@/hooks/use-toast";
 
 const RegistrationSecurity = () => {
   const navigate = useNavigate();
   const { data, update, reset } = useRegistration();
-  const passwordsFilled = useMemo(() => Boolean((data.password || "").trim() && (data.confirmPassword || "").trim()), [data.password, data.confirmPassword]);
-  const passwordsMatch = useMemo(() => (data.password || "") === (data.confirmPassword || ""), [data.password, data.confirmPassword]);
-  const allValid = passwordsFilled && passwordsMatch;
   const [showPwd, setShowPwd] = useState(false);
   const [showCpwd, setShowCpwd] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // Password validation
+  const passwordValid = useMemo(() => {
+    const pwd = data.password || "";
+    return pwd.length >= 8 && /[A-Z]/.test(pwd) && /\d/.test(pwd);
+  }, [data.password]);
+
+  const passwordsMatch = useMemo(() => {
+    return data.password && data.confirmPassword && data.password === data.confirmPassword;
+  }, [data.password, data.confirmPassword]);
+
+  const allValid = useMemo(() => {
+    return passwordValid && passwordsMatch;
+  }, [passwordValid, passwordsMatch]);
+
+  // Generate QR Code data
+  const generateQRCode = () => {
+    const qrData = {
+      id: data.role === "student" ? data.studentId : data.adminId,
+      name: `${data.firstName} ${data.lastName}`,
+      role: data.role,
+      department: data.department,
+      course: data.course,
+      position: data.position,
+      email: data.email,
+      authToken: `JRMSU_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      logo: data.role === "student" ? "JRMSU-KCS" : "JRMSU-KCL"
+    };
+    return btoa(JSON.stringify(qrData));
+  };
+
+  const handleFinish = async () => {
+    if (!allValid) {
+      setShowErrors(true);
+      return;
+    }
+
+    setIsSubmitting(true);
+    
+    try {
+      // Simulate API call for registration
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+      // Generate QR Code
+      const qrCode = generateQRCode();
+      
+      // Show success state
+      setShowSuccess(true);
+      
+      toast({
+        title: "✅ Registration Successful!",
+        description: "Your JRMSU account has been created. Your QR code has been generated.",
+      });
+      
+      // Wait 1 second then redirect
+      setTimeout(() => {
+        reset();
+        navigate("/");
+      }, 1000);
+      
+    } catch (error) {
+      toast({
+        title: "Registration Failed",
+        description: "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  if (showSuccess) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex items-center justify-center p-6">
+        <Card className="w-full max-w-2xl shadow-jrmsu-gold text-center">
+          <CardContent className="pt-6">
+            <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-primary mb-2">Registration Successful!</h2>
+            <p className="text-muted-foreground mb-4">Your JRMSU QR Code has been generated.</p>
+            <div className="bg-muted p-4 rounded-lg mb-4">
+              <QrCode className="h-24 w-24 mx-auto mb-2" />
+              <p className="text-sm font-mono">{data.role === "student" ? "JRMSU-KCS" : "JRMSU-KCL"}</p>
+              <p className="text-xs text-muted-foreground">QR Code generated successfully</p>
+            </div>
+            <p className="text-sm text-muted-foreground">Redirecting to login page...</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex items-center justify-center p-6">
-      <Card className="w-full max-w-3xl shadow-jrmsu-gold">
+      <Card className="w-full max-w-2xl shadow-jrmsu-gold">
         <CardHeader>
-          <CardTitle className="text-2xl text-primary">Phase 4: Account Security</CardTitle>
+          <NavigationProgress currentStep={4} totalSteps={4} />
+          <CardTitle className="text-2xl text-primary mt-4">Phase 4 of 4: Security & Account Setup</CardTitle>
+          <CardDescription>Create a secure password to complete your registration</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label htmlFor="pwd">Password *</Label>
-              <div className="relative">
-                <Input id="pwd" type={showPwd ? "text" : "password"} value={data.password || ""} onChange={(e) => update({ password: e.target.value })} />
-                <button type="button" onClick={() => setShowPwd((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-smooth" aria-label={showPwd ? "Hide password" : "Show password"}>
-                  {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+        <CardContent className="space-y-6">
+          {/* Password */}
+          <div className="space-y-2">
+            <Label htmlFor="pwd">Password *</Label>
+            <div className="relative">
+              <Input 
+                id="pwd" 
+                type={showPwd ? "text" : "password"} 
+                value={data.password || ""} 
+                onChange={(e) => update({ password: e.target.value })}
+                className={showErrors && !passwordValid ? "border-destructive" : ""}
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowPwd(v => !v)} 
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors" 
+                aria-label={showPwd ? "Hide password" : "Show password"}
+              >
+                {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="cpwd">Confirm Password *</Label>
-              <div className="relative">
-                <Input id="cpwd" type={showCpwd ? "text" : "password"} value={data.confirmPassword || ""} onChange={(e) => update({ confirmPassword: e.target.value })} />
-                <button type="button" onClick={() => setShowCpwd((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-smooth" aria-label={showCpwd ? "Hide password" : "Show password"}>
-                  {showCpwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
+            {showErrors && !passwordValid && (
+              <p className="text-xs text-destructive">
+                ⚠️ Password must be at least 8 characters with uppercase letter and number.
+              </p>
+            )}
+            <div className="text-xs text-muted-foreground space-y-1">
+              <p>Password requirements:</p>
+              <ul className="list-disc list-inside space-y-1">
+                <li className={data.password && data.password.length >= 8 ? "text-green-600" : ""}>
+                  Minimum 8 characters
+                </li>
+                <li className={data.password && /[A-Z]/.test(data.password) ? "text-green-600" : ""}>
+                  At least one uppercase letter
+                </li>
+                <li className={data.password && /\d/.test(data.password) ? "text-green-600" : ""}>
+                  At least one number
+                </li>
+              </ul>
             </div>
           </div>
-          <div className="flex justify-between mt-6">
-            <Button variant="outline" onClick={() => navigate("/register/institution")}>Previous</Button>
-            <Button disabled={!allValid} onClick={async () => {
-              // Basic required checks
-              const required = [data.password, data.confirmPassword];
-              if (required.some((v) => !v)) {
-                alert("Please fill in all required (*) fields. These are part of your credentials.");
-                return;
-              }
-              if (data.password !== data.confirmPassword) {
-                alert("Passwords do not match.");
-                return;
-              }
-              // Success UX: show message, wait 1s, redirect to login
-              alert("Registration Successful!");
-              await new Promise((r) => setTimeout(r, 1000));
-              reset();
-              navigate("/");
-            }}>Finish</Button>
+
+          {/* Confirm Password */}
+          <div className="space-y-2">
+            <Label htmlFor="cpwd">Confirm Password *</Label>
+            <div className="relative">
+              <Input 
+                id="cpwd" 
+                type={showCpwd ? "text" : "password"} 
+                value={data.confirmPassword || ""} 
+                onChange={(e) => update({ confirmPassword: e.target.value })}
+                className={showErrors && !passwordsMatch && data.confirmPassword ? "border-destructive" : ""}
+              />
+              <button 
+                type="button" 
+                onClick={() => setShowCpwd(v => !v)} 
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors" 
+                aria-label={showCpwd ? "Hide password" : "Show password"}
+              >
+                {showCpwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </div>
+            {showErrors && !passwordsMatch && data.confirmPassword && (
+              <p className="text-xs text-destructive">⚠️ Passwords do not match.</p>
+            )}
+          </div>
+
+          {/* QR Code Info */}
+          <div className="bg-muted/50 p-4 rounded-lg">
+            <div className="flex items-center gap-3 mb-2">
+              <QrCode className="h-5 w-5 text-primary" />
+              <h3 className="font-semibold text-primary">Automatic QR Code Generation</h3>
+            </div>
+            <p className="text-sm text-muted-foreground mb-2">
+              Upon successful registration, a unique JRMSU QR Code will be generated containing:
+            </p>
+            <ul className="text-xs text-muted-foreground list-disc list-inside space-y-1">
+              <li>Your profile information and ID</li>
+              <li>Encrypted authentication key</li>
+              <li>System login token</li>
+              <li>Logo: {data.role === "student" ? "JRMSU-KCS (Students)" : "JRMSU-KCL (Library Admin)"}</li>
+            </ul>
+          </div>
+
+          {/* Navigation */}
+          <div className="flex justify-between pt-6">
+            <Button variant="outline" onClick={() => navigate("/register/institution")}>
+              Back
+            </Button>
+            <Button 
+              onClick={handleFinish}
+              disabled={!allValid || isSubmitting}
+              className={!allValid ? "bg-muted text-muted-foreground cursor-not-allowed" : "bg-primary hover:bg-primary/90"}
+            >
+              {isSubmitting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Processing...
+                </>
+              ) : (
+                "Finish"
+              )}
+            </Button>
           </div>
         </CardContent>
       </Card>
