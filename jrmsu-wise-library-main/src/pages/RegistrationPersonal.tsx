@@ -7,7 +7,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ChevronsUpDown, Check } from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useRegistration } from "@/context/RegistrationContext";
 import { useEffect, useMemo, useState } from "react";
 import { 
@@ -23,7 +23,13 @@ import { NavigationProgress } from "@/components/ui/navigation-progress";
 
 const RegistrationPersonal = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data, update } = useRegistration();
+  
+  // Check URL parameters to determine navigation source
+  const urlParams = new URLSearchParams(location.search);
+  const fromSource = urlParams.get('from');
+  const userType = urlParams.get('type') || data.role;
   const [showErrors, setShowErrors] = useState(false);
   const [sameAsCurrent, setSameAsCurrent] = useState(false);
   const [selectedRegion, setSelectedRegion] = useState("");
@@ -108,6 +114,18 @@ const RegistrationPersonal = () => {
     }
   }, [sameAsCurrent, data.addressStreet, data.addressBarangay, data.addressMunicipality, 
       data.addressProvince, data.addressRegion, data.addressCountry, data.addressZip]);
+
+  // Smart back navigation handler
+  const handleBackNavigation = () => {
+    if (fromSource === 'student-management') {
+      navigate('/students');
+    } else if (fromSource === 'admin-management') {
+      navigate('/admins');
+    } else {
+      // Default behavior - go back to registration select (Phase 1)
+      navigate('/register');
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-accent/5 flex items-center justify-center p-6">
@@ -492,8 +510,8 @@ const RegistrationPersonal = () => {
 
           {/* Navigation Buttons */}
           <div className="flex justify-between pt-6">
-            <Button variant="outline" onClick={() => navigate("/register")}>
-              Back
+            <Button variant="outline" onClick={handleBackNavigation}>
+              {fromSource ? 'Cancel & Return' : 'Back'}
             </Button>
             <Button 
               disabled={!allValid}

@@ -8,6 +8,7 @@ import { useMemo, useState } from "react";
 import { Eye, EyeOff, CheckCircle2, Loader2, QrCode } from "lucide-react";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
 import { toast } from "@/hooks/use-toast";
+import { databaseService } from "@/services/database";
 
 const RegistrationSecurity = () => {
   const navigate = useNavigate();
@@ -32,20 +33,40 @@ const RegistrationSecurity = () => {
     return passwordValid && passwordsMatch;
   }, [passwordValid, passwordsMatch]);
 
-  // Generate QR Code data
+  // Generate QR Code data with proper structure for scanner compatibility
   const generateQRCode = () => {
+    const userId = data.role === "student" ? data.studentId : data.adminId;
+    const fullName = `${data.firstName} ${data.middleName || ''} ${data.lastName}`.replace(/\s+/g, ' ').trim();
+    
     const qrData = {
-      id: data.role === "student" ? data.studentId : data.adminId,
-      name: `${data.firstName} ${data.lastName}`,
-      role: data.role,
+      // Required fields matching QRLoginData interface
+      fullName: fullName,
+      userId: userId,
+      userType: data.role as "admin" | "student",
+      authCode: Math.random().toString().slice(2, 8),
+      encryptedToken: btoa(`${userId}-${Date.now()}`),
+      
+      // Optional fields
+      twoFactorKey: undefined, // Will be set when 2FA is enabled
       department: data.department,
       course: data.course,
+      year: data.year,
+      section: data.section,
       position: data.position,
-      email: data.email,
-      authToken: `JRMSU_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      logo: data.role === "student" ? "JRMSU-KCS" : "JRMSU-KCL"
+      role: data.role === "admin" ? "Administrator" : "Student",
+      
+      // System fields
+      systemTag: data.role === "student" ? "JRMSU-KCS" : "JRMSU-KCL",
+      systemId: "JRMSU-LIBRARY",
+      timestamp: Date.now(),
+      
+      // Legacy compatibility fields
+      realTimeAuthCode: Math.random().toString().slice(2, 8),
+      encryptedPasswordToken: btoa(`${userId}-${Date.now()}`),
+      twoFactorSetupKey: undefined
     };
-    return btoa(JSON.stringify(qrData));
+    
+    return JSON.stringify(qrData);
   };
 
   const handleFinish = async () => {
@@ -57,10 +78,52 @@ const RegistrationSecurity = () => {
     setIsSubmitting(true);
     
     try {
-      // Simulate API call for registration
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      console.log('🔧 Starting user registration process...', {
+        role: data.role,
+        id: data.role === "student" ? data.studentId : data.adminId,
+        name: `${data.firstName} ${data.lastName}`
+      });
       
-      // Generate QR Code
+      // Create user in database
+      const userId = data.role === "student" ? data.studentId : data.adminId;
+      
+      const userData = {
+        id: userId,
+        firstName: data.firstName,
+        middleName: data.middleName || undefined,
+        lastName: data.lastName,
+        fullName: `${data.firstName} ${data.middleName || ''} ${data.lastName}`.replace(/\s+/g, ' ').trim(),
+        email: data.email,
+        userType: data.role as "admin" | "student",
+        
+        // Student-specific fields
+        course: data.role === "student" ? data.course : undefined,
+        year: data.role === "student" ? data.year : undefined,
+        section: data.role === "student" ? data.section : undefined,
+        
+        // Admin-specific fields
+        department: data.role === "admin" ? data.department : undefined,
+        role: data.role === "admin" ? data.position : undefined,
+        
+        // Authentication - hash the password properly in production
+        passwordHash: btoa(`jrmsu_salt_${data.password}_${Date.now()}`), // Simple demo hash
+        twoFactorEnabled: false,
+        
+        // Profile data
+        phone: data.phone,
+        address: `${data.address || ''} ${data.city || ''} ${data.province || ''}`.trim() || undefined
+      };
+      
+      // Create user in database
+      const createResult = databaseService.createUser(userData);
+      
+      if (!createResult.success) {
+        throw new Error(createResult.error || "Failed to create user account");
+      }
+      
+      console.log('✅ User created successfully:', createResult.user?.id);
+      
+      // Generate QR Code with enhanced data
       const qrCode = generateQRCode();
       
       // Show success state
@@ -68,20 +131,37 @@ const RegistrationSecurity = () => {
       
       toast({
         title: "✅ Registration Successful!",
-        description: "Your JRMSU account has been created. Your QR code has been generated.",
+        description: `Your JRMSU account has been created successfully. Welcome, ${data.firstName}!`,
+        duration: 3000
       });
       
-      // Wait 1 second then redirect
+      // Wait 2 seconds then redirect to allow user to see success
       setTimeout(() => {
         reset();
-        navigate("/");
-      }, 1000);
+        navigate("/", { 
+          state: { 
+            message: "Registration completed successfully. You can now log in with your credentials.",
+            newUser: userId 
+          }
+        });
+      }, 2000);
       
-    } catch (error) {
+    } catch (error: any) {
+      console.error('❌ Registration failed:', error);
+      
+      let errorMessage = "Something went wrong during registration. Please try again.";
+      
+      if (error.message?.includes("already exists")) {
+        errorMessage = "An account with this ID or email already exists. Please use different credentials.";
+      } else if (error.message?.includes("Missing required fields")) {
+        errorMessage = "Please fill in all required fields and try again.";
+      }
+      
       toast({
         title: "Registration Failed",
-        description: "Something went wrong. Please try again.",
+        description: errorMessage,
         variant: "destructive",
+        duration: 4000
       });
     } finally {
       setIsSubmitting(false);

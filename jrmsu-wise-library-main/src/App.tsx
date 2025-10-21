@@ -13,6 +13,7 @@ import Reports from "./pages/Reports";
 import AppAdminQRs from "./pages/AppAdminQRs";
 import Settings from "./pages/Settings";
 import StudentManagement from "./pages/StudentManagement";
+import AdminManagement from "./pages/AdminManagement";
 import BookManagement from "./pages/BookManagement";
 import Registration from "./pages/Registration";
 import RegistrationSelect from "./pages/RegistrationSelect";
@@ -25,6 +26,11 @@ import ProtectedRoute from "@/components/route/ProtectedRoute";
 import { RoleGuard } from "@/components/route/RoleGuard";
 import { RegistrationProvider } from "@/context/RegistrationContext";
 import ErrorBoundary from "@/components/common/ErrorBoundary";
+
+// Import QR test utilities for development testing
+import './utils/qr-test';
+import './utils/qr-e2e-test';
+import './utils/qr-scannability-test';
 
 const queryClient = new QueryClient();
 
@@ -110,6 +116,14 @@ const App = () => (
               element={
                 <ProtectedRoute allow={["admin"]}>
                   <StudentManagement />
+                </ProtectedRoute>
+              }
+            />
+              <Route
+              path="/admins"
+              element={
+                <ProtectedRoute allow={["admin"]}>
+                  <AdminManagement />
                 </ProtectedRoute>
               }
             />

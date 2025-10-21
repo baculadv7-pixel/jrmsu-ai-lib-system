@@ -16,16 +16,28 @@ export interface QRCodeData {
   type: "user" | "book";
 }
 
-// User QR Code encoded data structure
+// Streamlined User QR Code structure for better readability with logo
 interface UserQRData {
+  // REQUIRED CORE FIELDS - minimal for better logo compatibility
   fullName: string;
   userId: string;
   userType: "admin" | "student";
-  authCode: string; // Real-time authentication code
-  encryptedToken: string; // Encrypted password token
-  twoFactorKey?: string; // 2FA setup key (linked to Google Authenticator)
-  timestamp: number;
   systemId: "JRMSU-LIBRARY";
+  systemTag: "JRMSU-KCL" | "JRMSU-KCS"; // JRMSU–KCL for Admins, JRMSU–KCS for Students
+  timestamp: number;
+  sessionToken: string; // Single authentication token
+  role: string;
+  
+  // OPTIONAL LEGACY FIELDS - for backward compatibility
+  authCode?: string; // Legacy authentication code
+  encryptedToken?: string; // Legacy encrypted token
+  realTimeAuthCode?: string; // Legacy name for authCode
+  encryptedPasswordToken?: string; // Legacy name for encryptedToken
+  twoFactorKey?: string; // 2FA setup key for Google Authenticator integration
+  twoFactorSetupKey?: string; // Legacy name for twoFactorKey
+  department?: string;
+  course?: string;
+  year?: string;
 }
 
 // Book QR Code encoded data structure
@@ -79,16 +91,26 @@ export function StableQRCode({
   // Generate stable QR code data
   const generateQRCodeData = (forceRegenerate = false): QRCodeData => {
     const fullName = `${userData.firstName} ${userData.middleName} ${userData.lastName}`.trim();
+    const timestamp = Date.now();
+    const sessionToken = btoa(`${userId}-${timestamp}`);
     
+    // Streamlined QR data structure for better readability
     const userQRData: UserQRData = {
+      // REQUIRED CORE FIELDS - minimal for better logo readability
       fullName,
       userId,
       userType,
-      authCode: generateAuthCode(),
-      encryptedToken: generateEncryptedToken(),
-      twoFactorKey,
-      timestamp: Date.now(),
-      systemId: "JRMSU-LIBRARY"
+      systemId: "JRMSU-LIBRARY",
+      systemTag: userType === "admin" ? "JRMSU-KCL" : "JRMSU-KCS",
+      timestamp: timestamp,
+      sessionToken: sessionToken,
+      role: userType === "admin" ? "Administrator" : "Student",
+      
+      // LEGACY COMPATIBILITY - only if 2FA is enabled
+      ...(twoFactorKey ? {
+        twoFactorKey,
+        twoFactorSetupKey: twoFactorKey
+      } : {})
     };
 
     // In real implementation, this would be encrypted
@@ -251,14 +273,18 @@ export function StableQRCode({
           <div className="p-4 bg-white rounded-lg border" id="stable-qr-code">
             <QRCodeSVG
               value={qrCodeData.qrCodeData}
-              size={200}
-              level="H"
+              size={256} // Increased size for better scanning
+              level="H" // Highest error correction for logo compatibility
               includeMargin={true}
               imageSettings={{
                 src: "/jrmsu-logo.jpg", // Add logo in center
-                height: 40,
-                width: 40,
-                excavate: true,
+                height: 40, // Optimal size for H-level error correction
+                width: 40,  // Optimal size for H-level error correction  
+                excavate: true, // Creates empty space behind logo
+                x: undefined, // Center horizontally
+                y: undefined, // Center vertically
+                opacity: 1.0, // Full opacity logo
+                crossOrigin: "anonymous" // Allow cross-origin loading
               }}
             />
           </div>
@@ -325,27 +351,103 @@ export function StableQRCode({
   );
 }
 
-// Utility function to validate JRMSU QR codes
+// Utility function to validate JRMSU QR codes with enhanced error handling
 export const validateJRMSUQRCode = (qrData: string): { isValid: boolean; data?: UserQRData | BookQRData; error?: string } => {
   try {
-    const parsed = JSON.parse(qrData);
-    
-    if (parsed.systemId !== "JRMSU-LIBRARY") {
-      return { isValid: false, error: "Invalid QR Code. Please scan a valid JRMSU Library System QR Code." };
+    // Check if QR data is empty or just whitespace
+    if (!qrData || qrData.trim().length === 0) {
+      return { isValid: false, error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." };
     }
     
-    // Validate user QR code
-    if (parsed.fullName && parsed.userId) {
+    const parsed = JSON.parse(qrData);
+    
+    // Check for required system tag
+    if (!parsed.systemId || parsed.systemId !== "JRMSU-LIBRARY") {
+      return { isValid: false, error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." };
+    }
+    
+    // Validate user QR code - check for all required fields
+    if (parsed.fullName || parsed.userId || parsed.userType) {
+      const missingFields = [];
+      
+      if (!parsed.fullName) missingFields.push("fullName");
+      if (!parsed.userId) missingFields.push("userId");
+      if (!parsed.userType) missingFields.push("userType");
+      
+      // Check for authentication token (new sessionToken OR legacy fields)
+      const hasSessionToken = parsed.sessionToken;
+      const hasLegacyAuth = parsed.authCode || parsed.realTimeAuthCode || parsed.encryptedToken || parsed.encryptedPasswordToken;
+      
+      if (!hasSessionToken && !hasLegacyAuth) {
+        missingFields.push("sessionToken or legacy authentication fields");
+      }
+      
+      if (!parsed.systemTag) missingFields.push("systemTag");
+      if (!parsed.systemId) missingFields.push("systemId");
+      
+      // Role is optional in new structure since it can be derived from userType
+      // if (!parsed.role) missingFields.push("role");
+      
+      if (missingFields.length > 0) {
+        console.warn('QR Code validation failed - missing fields:', missingFields);
+        return { 
+          isValid: false, 
+          error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
+        };
+      }
+      
+      // Validate user type
+      if (!['admin', 'student'].includes(parsed.userType)) {
+        return { 
+          isValid: false, 
+          error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
+        };
+      }
+      
+      // Validate system tag matches user type
+      const expectedSystemTag = parsed.userType === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS';
+      if (parsed.systemTag !== expectedSystemTag) {
+        console.warn(`QR Code validation failed - incorrect system tag: expected ${expectedSystemTag}, got ${parsed.systemTag}`);
+        return { 
+          isValid: false, 
+          error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
+        };
+      }
+      
       return { isValid: true, data: parsed as UserQRData };
     }
     
     // Validate book QR code
-    if (parsed.bookCode && parsed.title) {
+    if (parsed.bookCode || parsed.title) {
+      const missingFields = [];
+      
+      if (!parsed.bookCode) missingFields.push("bookCode");
+      if (!parsed.title) missingFields.push("title");
+      if (!parsed.author) missingFields.push("author");
+      if (!parsed.category) missingFields.push("category");
+      
+      if (missingFields.length > 0) {
+        console.warn('Book QR Code validation failed - missing fields:', missingFields);
+        return { 
+          isValid: false, 
+          error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
+        };
+      }
+      
       return { isValid: true, data: parsed as BookQRData };
     }
     
-    return { isValid: false, error: "QR Code format is not recognized." };
+    // QR code doesn't match expected format
+    return { 
+      isValid: false, 
+      error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
+    };
+    
   } catch (error) {
-    return { isValid: false, error: "Invalid QR Code format." };
+    console.error('QR Code parsing error:', error);
+    return { 
+      isValid: false, 
+      error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
+    };
   }
 };

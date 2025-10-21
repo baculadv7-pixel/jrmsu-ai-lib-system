@@ -40,8 +40,29 @@ const EnhancedProfile = () => {
   useEffect(() => {
     if (user?.id) {
       (async () => {
-        const resp = await generateUserQR({ userId: user.id });
-        setQrEnvelope(resp.envelope);
+        try {
+          const resp = await generateUserQR({ userId: user.id });
+          setQrEnvelope(resp.envelope);
+        } catch (error) {
+          console.error('Failed to generate QR code:', error);
+          // Fallback: Generate QR manually with minimal structure + 2FA
+          const fallbackQRData = JSON.stringify({
+            fullName: user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+            userId: user.id,
+            userType: user.role,
+            systemId: 'JRMSU-LIBRARY',
+            systemTag: user.role === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
+            timestamp: Date.now(),
+            sessionToken: btoa(`${user.id}-${Date.now()}`),
+            
+            // RESTORE 2FA setup key for Google Authenticator
+            ...(user.twoFactorKey ? {
+              twoFactorKey: user.twoFactorKey,
+              twoFactorSetupKey: user.twoFactorKey
+            } : {})
+          });
+          setQrEnvelope(fallbackQRData);
+        }
       })();
     }
   }, [user?.id]);
@@ -244,8 +265,32 @@ const EnhancedProfile = () => {
                       <Button
                         variant="outline"
                         onClick={async () => {
-                          const resp = await generateUserQR({ userId: "demo-user", rotate: true });
-                          setQrEnvelope(resp.envelope);
+                          if (user?.id) {
+                            try {
+                              const resp = await generateUserQR({ userId: user.id, rotate: true });
+                              setQrEnvelope(resp.envelope);
+                            } catch (error) {
+                              console.error('Failed to regenerate QR code:', error);
+                              // Fallback: Generate new QR manually with EXACT structure matching database
+                              const fallbackQRData = JSON.stringify({
+                                fullName: user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
+                                userId: user.id,
+                                userType: user.userType, // Use userType not role
+                                systemId: 'JRMSU-LIBRARY',
+                                systemTag: user.userType === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
+                                timestamp: Date.now(),
+                                sessionToken: btoa(`${user.id}-${Date.now()}`),
+                                role: user.userType === 'admin' ? 'Administrator' : 'Student',
+                                
+                                // RESTORE 2FA setup key for Google Authenticator
+                                ...(user.twoFactorKey ? {
+                                  twoFactorKey: user.twoFactorKey,
+                                  twoFactorSetupKey: user.twoFactorKey
+                                } : {})
+                              });
+                              setQrEnvelope(fallbackQRData);
+                            }
+                          }
                         }}
                       >
                         <RotateCcw className="h-4 w-4 mr-2" />

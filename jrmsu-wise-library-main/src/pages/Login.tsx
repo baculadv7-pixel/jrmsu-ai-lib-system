@@ -9,12 +9,14 @@ import { Eye, EyeOff, QrCode } from "lucide-react";
 import logo from "@/assets/jrmsu-logo.jpg";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
-import { SimpleQRCodeLogin } from "@/components/auth/SimpleQRCodeLogin";
+import { QRCodeLogin } from "@/components/auth/QRCodeLogin";
+import { WelcomeMessage, useWelcomeMessage } from "@/components/auth/WelcomeMessage";
 
 const Login = () => {
   const navigate = useNavigate();
-  const { signIn, verifyTotp } = useAuth();
+  const { signIn, verifyTotp, user } = useAuth();
   const { toast } = useToast();
+  const { isVisible, userData, showWelcome, hideWelcome } = useWelcomeMessage();
   const [showPassword, setShowPassword] = useState(false);
   const [userType, setUserType] = useState<"student" | "admin">("student");
   const [loginMethod, setLoginMethod] = useState<"manual" | "qr">("manual");
@@ -85,9 +87,18 @@ const Login = () => {
               return;
             }
           }
-        } catch {}
+        } catch (error) {
+          // Handle session parsing error
+          console.warn('Session parsing error:', error);
+        }
       }
-      navigate("/dashboard");
+      
+      // Get user data from session after successful login
+      const updatedSession = JSON.parse(localStorage.getItem("jrmsu_auth_session") || "null");
+      const firstName = updatedSession?.firstName || "User";
+      
+      // Show welcome message with user's name
+      showWelcome(firstName, userType);
     } catch (err: any) {
       toast({
         title: "Login failed",
@@ -115,26 +126,28 @@ const Login = () => {
         </CardHeader>
 
         <CardContent className="space-y-6">
-          {/* User Type Toggle */}
-          <Tabs
-            value={userType}
-            onValueChange={(v) => {
-              const role = v as "student" | "admin";
-              setUserType(role);
-              setFormData((prev) => ({
-                ...prev,
-                id: role === "student" ? (prev.id || "KC-") : (prev.id || "KCL-"),
-              }));
-              setIdTouched(false);
-            }}
-          >
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="student">Student</TabsTrigger>
-              <TabsTrigger value="admin">Admin</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          {/* User Type Toggle - Hide during QR login */}
+          {loginMethod === "manual" && (
+            <Tabs
+              value={userType}
+              onValueChange={(v) => {
+                const role = v as "student" | "admin";
+                setUserType(role);
+                setFormData((prev) => ({
+                  ...prev,
+                  id: role === "student" ? (prev.id || "KC-") : (prev.id || "KCL-"),
+                }));
+                setIdTouched(false);
+              }}
+            >
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="student">Student</TabsTrigger>
+                <TabsTrigger value="admin">Admin</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          )}
 
-          {/* Login Method Selection */}
+          {/* Login Method Selection - Always show both buttons */}
           <div className="flex gap-2">
             <Button
               type="button"
@@ -238,13 +251,30 @@ const Login = () => {
               </p>
             </form>
           ) : (
-            <SimpleQRCodeLogin 
+            <QRCodeLogin 
               onBackToManual={() => setLoginMethod("manual")}
-              onLoginSuccess={() => navigate("/dashboard")}
+              onLoginSuccess={() => {
+                // Redirect handled by QRCodeLogin after welcome message
+                navigate("/dashboard");
+              }}
             />
           )}
         </CardContent>
       </Card>
+
+      {/* Welcome Message Overlay for manual login */}
+      {userData && (
+        <WelcomeMessage
+          firstName={userData.firstName}
+          userRole={userData.userRole}
+          isVisible={isVisible}
+          onComplete={() => {
+            hideWelcome();
+            navigate("/dashboard");
+          }}
+          duration={1500}
+        />
+      )}
     </div>
   );
 };

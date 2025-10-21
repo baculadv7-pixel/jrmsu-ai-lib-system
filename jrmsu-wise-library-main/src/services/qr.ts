@@ -1,5 +1,6 @@
 // QR service wired to Supabase Edge Functions with local fallbacks
 import { supabase } from "@/integrations/supabase/client";
+import { databaseService } from "./database";
 
 export type GenerateUserQRParams = { userId: string; rotate?: boolean };
 export type GenerateBookQRParams = { bookId: string };
@@ -15,7 +16,43 @@ export async function generateUserQR(params: GenerateUserQRParams): Promise<QRGe
     if (error) throw error;
     return data as QRGenerateResult;
   } catch {
-    const envelope = JSON.stringify({ v: 1, typ: "user", uid: params.userId, ts: Date.now(), rotate: !!params.rotate });
+    // Generate scanner-compatible QR code structure
+    // For development, we'll generate a compatible structure since Supabase functions aren't available
+    
+    // Fetch actual user data from database
+    const user = databaseService.getUserById(params.userId);
+    if (!user) {
+      throw new Error(`User not found: ${params.userId}`);
+    }
+    
+    const userType = user.userType;
+    const fullName = user.fullName;
+    
+    // Generate minimal essential data for optimal QR readability with logo space
+    const timestamp = Date.now();
+    const sessionToken = btoa(`${params.userId}-${timestamp}`);
+    
+    // EXACT QR structure matching database and validator expectations
+    const qrData = {
+      // CORE REQUIRED FIELDS - matches database authenticateWithQRCode expectations
+      fullName: fullName,
+      userId: params.userId,
+      userType: userType,
+      systemId: "JRMSU-LIBRARY",
+      systemTag: userType === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
+      timestamp: timestamp,
+      sessionToken: sessionToken,
+      role: userType === 'admin' ? 'Administrator' : 'Student',
+      
+      // RESTORE 2FA SETUP KEY - for Google Authenticator compatibility
+      ...(user.twoFactorKey ? {
+        twoFactorKey: user.twoFactorKey,
+        twoFactorSetupKey: user.twoFactorKey  // Legacy field name
+      } : {})
+    };
+    
+    const envelope = JSON.stringify(qrData);
+    
     return { envelope };
   }
 }
@@ -80,16 +117,22 @@ export async function setGlobal2FAEnabled(_enabled: boolean): Promise<void> {
   }
 }
 
-// QR Code Authentication API Endpoints
+// QR Code Authentication API Endpoints - Updated structure
 export type QRLoginData = {
   fullName: string;
   userId: string;
   userType: "admin" | "student";
-  authCode: string;
-  encryptedToken: string;
-  twoFactorKey?: string;
-  timestamp: number;
   systemId: "JRMSU-LIBRARY";
+  systemTag: "JRMSU-KCL" | "JRMSU-KCS";
+  timestamp: number;
+  sessionToken: string;
+  role: string;
+  
+  // Legacy fields for backward compatibility
+  authCode?: string;
+  encryptedToken?: string;
+  twoFactorKey?: string;
+  twoFactorSetupKey?: string;
 };
 
 export type QRLoginResult = {
@@ -171,11 +214,22 @@ export async function validateQRCodeData(qrData: string): Promise<{ isValid: boo
       };
     }
     
-    // Validate required fields for user login
-    if (!parsed.fullName || !parsed.userId || !parsed.userType || !parsed.authCode || !parsed.encryptedToken) {
+    // Validate required fields for user login (new structure)
+    if (!parsed.fullName || !parsed.userId || !parsed.userType || !parsed.systemTag) {
       return { 
         isValid: false, 
         error: "QR Code is missing required authentication data." 
+      };
+    }
+    
+    // Validate authentication token (sessionToken OR legacy fields)
+    const hasSessionToken = parsed.sessionToken;
+    const hasLegacyAuth = parsed.authCode || parsed.encryptedToken;
+    
+    if (!hasSessionToken && !hasLegacyAuth) {
+      return { 
+        isValid: false, 
+        error: "QR Code is missing required authentication token." 
       };
     }
     

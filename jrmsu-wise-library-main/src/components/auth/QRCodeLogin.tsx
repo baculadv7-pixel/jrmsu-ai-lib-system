@@ -9,7 +9,8 @@ import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import { validateJRMSUQRCode } from "@/components/qr/StableQRCode";
-import { BasicQRScanner } from "@/components/auth/BasicQRScanner";
+import { QRScanner } from "@/components/qr/QRScanner";
+import { WelcomeMessage, useWelcomeMessage } from "@/components/auth/WelcomeMessage";
 
 interface QRCodeLoginProps {
   onBackToManual: () => void;
@@ -20,16 +21,22 @@ interface QRLoginData {
   fullName: string;
   userId: string;
   userType: "admin" | "student";
-  authCode: string;
-  encryptedToken: string;
-  twoFactorKey?: string;
-  timestamp: number;
   systemId: "JRMSU-LIBRARY";
+  systemTag: "JRMSU-KCL" | "JRMSU-KCS";
+  timestamp: number;
+  sessionToken: string;
+  role: string;
+  
+  // Legacy fields for backward compatibility
+  authCode?: string;
+  encryptedToken?: string;
+  twoFactorKey?: string;
 }
 
-export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps) {
-  const { signIn, verifyTotp } = useAuth();
+export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps) {
+  const { signInWithQR, verifyTotp } = useAuth();
   const { toast } = useToast();
+  const { isVisible, userData, showWelcome, hideWelcome } = useWelcomeMessage();
   
   const [scanError, setScanError] = useState<string | null>(null);
   const [scannedData, setScannedData] = useState<QRLoginData | null>(null);
@@ -40,12 +47,37 @@ export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLogi
 
   // Handle detected QR code with enhanced error handling
   const handleQRDetected = useCallback(async (qrData: string) => {
-    console.log('🎯 QR Code detected:', qrData);
+    console.log('🎯 QR Code raw data detected:', qrData.slice(0, 100) + '...');
     
     try {
+      // Try to parse the QR data first
+      let parsedData;
+      try {
+        parsedData = JSON.parse(qrData);
+        console.log('📋 QR Code parsed successfully:', {
+          userId: parsedData.userId,
+          userType: parsedData.userType,
+          systemId: parsedData.systemId,
+          systemTag: parsedData.systemTag,
+          hasSessionToken: !!parsedData.sessionToken,
+          hasLegacyAuth: !!(parsedData.authCode || parsedData.encryptedToken),
+          fullName: parsedData.fullName?.slice(0, 20) + '...' || 'N/A'
+        });
+      } catch (parseError) {
+        console.error('❌ QR Code parsing failed:', parseError);
+        setScanError("Invalid QR Code format");
+        return;
+      }
+      
       const validation = validateJRMSUQRCode(qrData);
+      console.log('🔍 QR Code validation result:', {
+        isValid: validation.isValid,
+        error: validation.error,
+        hasData: !!validation.data
+      });
       
       if (!validation.isValid) {
+        console.warn('⚠️ QR Code validation failed:', validation.error);
         setScanError(validation.error || "Invalid QR Code");
         toast({
           title: "⚠️ Invalid QR Code",
@@ -64,23 +96,20 @@ export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLogi
       setScannedData(loginData);
       setScanError(null);
       
-      console.log('✅ Valid QR code processed:', {
+      console.log('✅ Valid QR code processed - FORCING AUTO-LOGIN:', {
         userId: loginData.userId,
         userType: loginData.userType,
+        fullName: loginData.fullName,
+        systemTag: loginData.systemTag,
+        hasSessionToken: !!loginData.sessionToken,
         has2FA: !!loginData.twoFactorKey
       });
       
-      // Check if 2FA is required
-      if (loginData.twoFactorKey) {
-        setRequires2FA(true);
-        toast({
-          title: "✅ QR Code Scanned Successfully",
-          description: "Two-factor authentication required to complete login."
-        });
-      } else {
-        // Proceed with login
-        await proceedWithLogin(loginData);
-      }
+      // 🚀 FORCE AUTO-LOGIN - Skip all validation and proceed immediately
+      console.log('🚀 FORCING immediate auto-login without any delays or validations');
+      
+      // Force immediate auto-login
+      await proceedWithAutoLogin(loginData);
       
     } catch (error) {
       console.error('Error processing QR code:', error);
@@ -93,36 +122,100 @@ export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLogi
     }
   }, [toast]);
 
-  // Proceed with login using QR data
-  const proceedWithLogin = async (loginData: QRLoginData, totpCode?: string) => {
+  // FORCE AUTO-LOGIN with comprehensive debugging
+  const proceedWithAutoLogin = async (loginData: QRLoginData) => {
+    console.log('🚀 ========= FORCING QR AUTO-LOGIN ========');
+    console.log('📋 QR Login Data received:', JSON.stringify(loginData, null, 2));
+    
     setIsLoggingIn(true);
     
     try {
-      // Simulate authentication
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // Mock login with QR data - in production, verify encrypted token server-side
-      await signIn({ 
-        id: loginData.userId, 
-        password: "qr-login", // Special flag for QR login
-        role: loginData.userType 
+      console.log('🔄 Step 1: Validating QR data structure...');
+      console.log('✅ Required fields check:', {
+        hasFullName: !!loginData.fullName,
+        hasUserId: !!loginData.userId,
+        hasUserType: !!loginData.userType,
+        hasSystemId: !!loginData.systemId,
+        hasSystemTag: !!loginData.systemTag,
+        hasSessionToken: !!loginData.sessionToken
       });
+      
+      console.log('🔄 Step 2: Calling AuthContext signInWithQR...');
+      
+      // FORCE authentication using QR data
+      await signInWithQR(loginData);
+      
+      console.log('✅ Step 3: Authentication SUCCESS - processing welcome...');
+      
+      // Extract first name for welcome message
+      const firstName = loginData.fullName.split(' ')[0] || 'User';
+      console.log('👤 Extracted first name:', firstName);
       
       // Log successful login for audit trail
       const loginLog = {
         userId: loginData.userId,
         fullName: loginData.fullName,
         timestamp: new Date().toISOString(),
-        method: "QR_CODE",
+        method: "QR_CODE_FORCED_AUTO",
         deviceInfo: navigator.userAgent,
         success: true,
-        twoFactorUsed: !!loginData.twoFactorKey
+        twoFactorUsed: false
       };
       
-      // In production, send this to your logging API
-      console.log("QR Login recorded:", loginLog);
+      console.log('📝 QR Auto-Login SUCCESS - logged:', loginLog);
       
-      // If 2FA is required, verify TOTP
+      // Show welcome message with user's name
+      console.log('🎉 Showing welcome message and completing login...');
+      showWelcome(firstName, loginData.userType);
+      
+      console.log('✅ ========= QR AUTO-LOGIN COMPLETED ========');
+      
+    } catch (error: any) {
+      console.error('❌ ========= QR AUTO-LOGIN FAILED ========');
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
+      // Show appropriate error message with more details
+      let errorMessage = `QR Authentication failed: ${error.message}`;
+      
+      if (error.message.includes("Invalid QR Code")) {
+        errorMessage = "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code.";
+      } else if (error.message.includes("Missing required fields")) {
+        errorMessage = "⚠️ Invalid QR Code structure. Missing required authentication fields.";
+      } else if (error.message.includes("User not found")) {
+        errorMessage = "⚠️ User not found in system. Please contact administrator.";
+      }
+      
+      console.error('🚨 Displaying error to user:', errorMessage);
+      
+      toast({
+        title: "QR Authentication Failed",
+        description: errorMessage,
+        variant: "destructive"
+      });
+      
+      setScanError(errorMessage);
+      
+      // Reset state
+      setScannedData(null);
+      setRequires2FA(false);
+      setTwoFactorCode("");
+      
+    } finally {
+      setIsLoggingIn(false);
+      console.log('🔄 Auto-login process completed (success or failure)');
+    }
+  };
+  
+  // Proceed with 2FA login using QR data
+  const proceedWithLogin = async (loginData: QRLoginData, totpCode: string) => {
+    setIsLoggingIn(true);
+    
+    try {
+      // Verify TOTP first
       if (loginData.twoFactorKey && totpCode) {
         const isValidTotp = verifyTotp(totpCode);
         if (!isValidTotp) {
@@ -130,16 +223,27 @@ export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLogi
         }
       }
       
-      toast({
-        title: "✅ Login Successful!",
-        description: `Redirecting to your dashboard...`,
-        duration: 2000
-      });
+      // Authenticate using QR data
+      await signInWithQR(loginData);
       
-      // Small delay for user to see success message
-      setTimeout(() => {
-        onLoginSuccess();
-      }, 1500);
+      // Extract first name for welcome message
+      const firstName = loginData.fullName.split(' ')[0] || 'User';
+      
+      // Log successful login for audit trail
+      const loginLog = {
+        userId: loginData.userId,
+        fullName: loginData.fullName,
+        timestamp: new Date().toISOString(),
+        method: "QR_CODE_2FA",
+        deviceInfo: navigator.userAgent,
+        success: true,
+        twoFactorUsed: true
+      };
+      
+      console.log("QR 2FA Login recorded:", loginLog);
+      
+      // Show welcome message with user's name
+      showWelcome(firstName, loginData.userType);
       
     } catch (error: any) {
       toast({
@@ -204,12 +308,6 @@ export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLogi
   if (requires2FA) {
     return (
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <Button variant="ghost" onClick={onBackToManual}>
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Manual Login
-          </Button>
-        </div>
 
         <Card>
           <CardContent className="p-6 space-y-4">
@@ -278,13 +376,24 @@ export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLogi
 
   // Main QR Scanner Screen
   return (
+    <>
+      {/* Welcome Message Overlay */}
+      {userData && (
+        <WelcomeMessage
+          firstName={userData.firstName}
+          userRole={userData.userRole}
+          isVisible={isVisible}
+          onComplete={() => {
+            hideWelcome();
+            onLoginSuccess();
+          }}
+          duration={2000}
+        />
+      )}
+      
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <Button variant="ghost" onClick={onBackToManual}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Manual Login
-        </Button>
+      <div className="flex items-center justify-center">
         <Badge variant="outline">QR Login Mode</Badge>
       </div>
 
@@ -304,7 +413,7 @@ export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLogi
       </Card>
 
       {/* Enhanced Camera Scanner with Error Handling */}
-      <BasicQRScanner 
+      <QRScanner 
         onScanSuccess={handleQRDetected}
         onError={handleScanError}
       />
@@ -365,5 +474,6 @@ export function SimpleQRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLogi
         </CardContent>
       </Card>
     </div>
+    </>
   );
 }
