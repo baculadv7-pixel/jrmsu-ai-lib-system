@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { QrCode, Download, Shield, RotateCcw } from "lucide-react";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
-import AIAssistant from "@/components/Layout/AIAssistant";
 import QRCodeDisplay, { downloadCanvasAsPng } from "@/components/qr/QRCodeDisplay";
 import { useEffect, useRef, useState } from "react";
 import { generateUserQR } from "@/services/qr";

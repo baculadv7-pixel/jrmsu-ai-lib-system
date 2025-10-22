@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Search, UserPlus, Edit, Trash2, Eye, Shield, Building, Calendar, QrCode, SortAsc, SortDesc } from "lucide-react";
+import { Search, UserPlus, Edit, Trash2, Eye, Shield, Building, Calendar, QrCode, SortAsc, SortDesc, Users, Filter } from "lucide-react";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
@@ -32,30 +32,70 @@ const AdminManagement = () => {
   
   const [searchTerm, setSearchTerm] = useState("");
   const [admins, setAdmins] = useState<User[]>([]);
-  const [filteredAdmins, setFilteredAdmins] = useState<User[]>([]);
   const [sortBy, setSortBy] = useState<'name' | 'id' | 'email' | 'created'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   
   // Modal state
   const [selectedAdmin, setSelectedAdmin] = useState<User | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  
+  // Filter states
+  const [filterDepartment, setFilterDepartment] = useState<string>("all");
+  const [filterRole, setFilterRole] = useState<string>("all");
+  const [filterStatus, setFilterStatus] = useState<string>("all");
 
   // Load admins from database
   useEffect(() => {
     loadAdmins();
   }, []);
 
-  // Filter and sort admins when search term or sort options change
-  useEffect(() => {
+  // Get unique filter values
+  const uniqueDepartments = useMemo(() => {
+    const departments = new Set(admins.map(a => a.department).filter(Boolean));
+    return Array.from(departments).sort();
+  }, [admins]);
+
+  const uniqueRoles = useMemo(() => {
+    const roles = new Set(admins.map(a => a.role).filter(Boolean));
+    return Array.from(roles).sort();
+  }, [admins]);
+
+  // Filter and sort admins (real-time)
+  const filteredAdmins = useMemo(() => {
     let filtered = admins;
     
+    // Search filter
     if (searchTerm.trim()) {
-      filtered = databaseService.searchUsers(searchTerm, "admin");
+      const lowerQuery = searchTerm.toLowerCase();
+      filtered = filtered.filter(admin =>
+        admin.fullName.toLowerCase().includes(lowerQuery) ||
+        admin.email.toLowerCase().includes(lowerQuery) ||
+        admin.id.toLowerCase().includes(lowerQuery) ||
+        (admin.department && admin.department.toLowerCase().includes(lowerQuery)) ||
+        (admin.role && admin.role.toLowerCase().includes(lowerQuery))
+      );
     }
     
-    filtered = databaseService.sortUsers(filtered, sortBy, sortOrder);
-    setFilteredAdmins(filtered);
-  }, [searchTerm, admins, sortBy, sortOrder]);
+    // Department filter
+    if (filterDepartment !== "all") {
+      filtered = filtered.filter(a => a.department === filterDepartment);
+    }
+    
+    // Role filter
+    if (filterRole !== "all") {
+      filtered = filtered.filter(a => a.role === filterRole);
+    }
+    
+    // Status filter
+    if (filterStatus === "active") {
+      filtered = filtered.filter(a => a.isActive);
+    } else if (filterStatus === "inactive") {
+      filtered = filtered.filter(a => !a.isActive);
+    }
+    
+    // Sort
+    return databaseService.sortUsers(filtered, sortBy, sortOrder);
+  }, [searchTerm, admins, sortBy, sortOrder, filterDepartment, filterRole, filterStatus]);
 
   const loadAdmins = () => {
     try {
@@ -153,14 +193,71 @@ const AdminManagement = () => {
               </Button>
             </div>
 
+            {/* Real-Time Statistics */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card className="shadow-jrmsu">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Total Admins
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <Users className="h-5 w-5 text-blue-600" />
+                    <span className="text-3xl font-bold text-blue-600">{admins.length}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="shadow-jrmsu">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Active Admins
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-green-600 h-5" />
+                    <span className="text-3xl font-bold text-green-600">{admins.filter(a => a.isActive).length}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="shadow-jrmsu">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Deactivated
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-red-600 h-5" />
+                    <span className="text-3xl font-bold text-red-600">{admins.filter(a => !a.isActive).length}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="shadow-jrmsu">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Filtered Results
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-5 w-5 text-amber-600" />
+                    <span className="text-3xl font-bold text-amber-600">{filteredAdmins.length}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
             {/* Search and Filters */}
             <Card className="shadow-jrmsu">
-              <CardContent className="p-6">
+              <CardContent className="p-6 space-y-4">
+                {/* Search Bar */}
                 <div className="flex gap-4 items-center">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search by admin name, ID, email, or department..."
+                      placeholder="Search by admin name, ID, email, department, or role..."
                       value={searchTerm}
                       onChange={(e) => setSearchTerm(e.target.value)}
                       className="pl-9"
@@ -184,12 +281,54 @@ const AdminManagement = () => {
                   </div>
                 </div>
                 
-                {/* Results count */}
-                <div className="mt-3 text-sm text-muted-foreground">
-                  {searchTerm ? 
-                    `Found ${filteredAdmins.length} administrators matching "${searchTerm}"` :
-                    `Showing ${filteredAdmins.length} total administrators`
-                  }
+                {/* Filters */}
+                <div className="flex gap-4 items-center">
+                  <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">Filter by:</span>
+                  <Select value={filterDepartment} onValueChange={setFilterDepartment}>
+                    <SelectTrigger className="w-52">
+                      <SelectValue placeholder="Department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Departments</SelectItem>
+                      {uniqueDepartments.map(dept => (
+                        <SelectItem key={dept} value={dept}>{dept}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterRole} onValueChange={setFilterRole}>
+                    <SelectTrigger className="w-52">
+                      <SelectValue placeholder="Role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Roles</SelectItem>
+                      {uniqueRoles.map(role => (
+                        <SelectItem key={role} value={role}>{role}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterStatus} onValueChange={setFilterStatus}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Status</SelectItem>
+                      <SelectItem value="active">Active</SelectItem>
+                      <SelectItem value="inactive">Deactivated</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  {(filterDepartment !== "all" || filterRole !== "all" || filterStatus !== "all") && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => {
+                        setFilterDepartment("all");
+                        setFilterRole("all");
+                        setFilterStatus("all");
+                      }}
+                    >
+                      Clear Filters
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -253,6 +392,15 @@ const AdminManagement = () => {
                           className="text-xs"
                         >
                           {admin.twoFactorEnabled ? "✅ Enabled" : "❌ Disabled"}
+                        </Badge>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-muted-foreground">Status:</span>
+                        <Badge 
+                          variant={admin.isActive ? "default" : "destructive"} 
+                          className="text-xs"
+                        >
+                          {admin.isActive ? "Active" : "Deactivated"}
                         </Badge>
                       </div>
                       <div className="flex justify-between">

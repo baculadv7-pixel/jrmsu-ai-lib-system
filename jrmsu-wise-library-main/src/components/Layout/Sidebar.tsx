@@ -39,7 +39,7 @@ const Sidebar = ({ userType }: SidebarProps) => {
   const navItems = userType === "admin" ? adminNavItems : studentNavItems;
 
   return (
-    <aside className="bg-card border-r w-64 min-h-[calc(100vh-4rem)] shadow-sm">
+    <aside className="bg-card border-r w-64 min-h-[calc(100vh-4rem)] shadow-sm overflow-y-auto">
       <nav className="p-4 space-y-2">
         {navItems.map((item) => (
           <NavLink

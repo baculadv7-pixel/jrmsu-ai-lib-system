@@ -10,9 +10,17 @@ export interface BookRecord {
   copies: number;
   available: number;
   status: BookStatus;
+  [key: string]: any; // Dynamic columns support
+}
+
+export interface CustomColumn {
+  key: string;
+  label: string;
+  type: 'text' | 'number' | 'date';
 }
 
 const BOOKS_KEY = "jrmsu_books";
+const CUSTOM_COLUMNS_KEY = "jrmsu_book_custom_columns";
 
 function readBooks(): BookRecord[] {
   try {
@@ -54,6 +62,49 @@ export const BooksService = {
   remove(id: string) {
     const books = readBooks().filter((b) => b.id !== id);
     writeBooks(books);
+  },
+  
+  // Custom columns management
+  getCustomColumns(): CustomColumn[] {
+    try {
+      const raw = localStorage.getItem(CUSTOM_COLUMNS_KEY);
+      if (!raw) return [];
+      const cols = JSON.parse(raw) as CustomColumn[];
+      return Array.isArray(cols) ? cols : [];
+    } catch {
+      return [];
+    }
+  },
+  
+  addCustomColumn(column: CustomColumn) {
+    const columns = this.getCustomColumns();
+    if (columns.some(c => c.key === column.key)) {
+      throw new Error("Column already exists");
+    }
+    columns.push(column);
+    localStorage.setItem(CUSTOM_COLUMNS_KEY, JSON.stringify(columns));
+    
+    // Update all existing books with the new column (default empty value)
+    const books = readBooks();
+    const defaultValue = column.type === 'number' ? 0 : '';
+    const updated = books.map(book => ({
+      ...book,
+      [column.key]: book[column.key] ?? defaultValue
+    }));
+    writeBooks(updated);
+  },
+  
+  removeCustomColumn(key: string) {
+    const columns = this.getCustomColumns().filter(c => c.key !== key);
+    localStorage.setItem(CUSTOM_COLUMNS_KEY, JSON.stringify(columns));
+    
+    // Remove the column from all books
+    const books = readBooks();
+    const updated = books.map(book => {
+      const { [key]: removed, ...rest } = book;
+      return rest;
+    });
+    writeBooks(updated);
   },
   ensureSeed() {
     const books = readBooks();

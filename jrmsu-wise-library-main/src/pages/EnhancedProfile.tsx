@@ -9,7 +9,6 @@ import { Separator } from "@/components/ui/separator";
 import { QrCode, Download, Shield, RotateCcw, Edit, Save, X } from "lucide-react";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
-import AIAssistant from "@/components/Layout/AIAssistant";
 import QRCodeDisplay, { downloadCanvasAsPng } from "@/components/qr/QRCodeDisplay";
 import { ProfilePicture } from "@/components/profile/ProfilePicture";
 import { useAuth } from "@/context/AuthContext";
@@ -543,7 +542,6 @@ const EnhancedProfile = () => {
         </main>
       </div>
 
-      <AIAssistant />
     </div>
   );
 };

@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
-import AIAssistant from "@/components/Layout/AIAssistant";
 import { listUserQRCodesForAdmin, generateUserQR } from "@/services/qr";
 import QRCodeDisplay, { downloadCanvasAsPng } from "@/components/qr/QRCodeDisplay";
 
@@ -63,11 +62,10 @@ const AppAdminQRs = () => {
           </div>
         </main>
       </div>
-      <AIAssistant />
+
     </div>
   );
 };
-
 export default AppAdminQRs;
 
 

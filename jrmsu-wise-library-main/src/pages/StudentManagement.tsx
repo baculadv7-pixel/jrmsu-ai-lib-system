@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Search, UserPlus, Edit, Trash2, Eye, GraduationCap, SortAsc, SortDesc } from "lucide-react";
+import { Search, UserPlus, Edit, Trash2, Eye, GraduationCap, SortAsc, SortDesc, Users, Filter } from "lucide-react";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
@@ -21,28 +21,70 @@ const StudentManagement = () => {
   
   const [searchTerm, setSearchTerm] = useState("");
   const [students, setStudents] = useState<User[]>([]);
-  const [filteredStudents, setFilteredStudents] = useState<User[]>([]);
   const [sortBy, setSortBy] = useState<'name' | 'id' | 'email' | 'created'>('name');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [selectedStudent, setSelectedStudent] = useState<User | null>(null);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  
+  // Filter states
+  const [filterCourse, setFilterCourse] = useState<string>("all");
+  const [filterYear, setFilterYear] = useState<string>("all");
+  const [filterSection, setFilterSection] = useState<string>("all");
 
   // Load students from database
   useEffect(() => {
     loadStudents();
   }, []);
 
-  // Filter and sort students when search term or sort options change
-  useEffect(() => {
+  // Get unique filter values
+  const uniqueCourses = useMemo(() => {
+    const courses = new Set(students.map(s => s.course).filter(Boolean));
+    return Array.from(courses).sort();
+  }, [students]);
+
+  const uniqueYears = useMemo(() => {
+    const years = new Set(students.map(s => s.year).filter(Boolean));
+    return Array.from(years).sort();
+  }, [students]);
+
+  const uniqueSections = useMemo(() => {
+    const sections = new Set(students.map(s => s.section).filter(Boolean));
+    return Array.from(sections).sort();
+  }, [students]);
+
+  // Filter and sort students (real-time)
+  const filteredStudents = useMemo(() => {
     let filtered = students;
     
+    // Search filter
     if (searchTerm.trim()) {
-      filtered = databaseService.searchUsers(searchTerm, "student");
+      const lowerQuery = searchTerm.toLowerCase();
+      filtered = filtered.filter(student =>
+        student.fullName.toLowerCase().includes(lowerQuery) ||
+        student.email.toLowerCase().includes(lowerQuery) ||
+        student.id.toLowerCase().includes(lowerQuery) ||
+        (student.course && student.course.toLowerCase().includes(lowerQuery))
+      );
     }
     
-    filtered = databaseService.sortUsers(filtered, sortBy, sortOrder);
-    setFilteredStudents(filtered);
-  }, [searchTerm, students, sortBy, sortOrder]);
+    // Course filter
+    if (filterCourse !== "all") {
+      filtered = filtered.filter(s => s.course === filterCourse);
+    }
+    
+    // Year filter
+    if (filterYear !== "all") {
+      filtered = filtered.filter(s => s.year === filterYear);
+    }
+    
+    // Section filter
+    if (filterSection !== "all") {
+      filtered = filtered.filter(s => s.section === filterSection);
+    }
+    
+    // Sort
+    return databaseService.sortUsers(filtered, sortBy, sortOrder);
+  }, [searchTerm, students, sortBy, sortOrder, filterCourse, filterYear, filterSection]);
 
   const loadStudents = () => {
     try {
@@ -117,17 +159,143 @@ const StudentManagement = () => {
               </Button>
             </div>
 
+            {/* Real-Time Statistics */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <Card className="shadow-jrmsu">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Total Students
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <Users className="h-5 w-5 text-green-600" />
+                    <span className="text-3xl font-bold text-green-600">{students.length}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="shadow-jrmsu">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Filtered Results
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-5 w-5 text-blue-600" />
+                    <span className="text-3xl font-bold text-blue-600">{filteredStudents.length}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="shadow-jrmsu">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Active Students
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <Badge className="bg-green-600 h-5" />
+                    <span className="text-3xl font-bold">{students.filter(s => s.isActive).length}</span>
+                  </div>
+                </CardContent>
+              </Card>
+              <Card className="shadow-jrmsu">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    QR Active
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center gap-2">
+                    <GraduationCap className="h-5 w-5 text-amber-600" />
+                    <span className="text-3xl font-bold text-amber-600">{students.filter(s => s.qrCodeActive).length}</span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
             {/* Search and Filters */}
             <Card className="shadow-jrmsu">
-              <CardContent className="p-6">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by student name, ID, or email..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-9"
-                  />
+              <CardContent className="p-6 space-y-4">
+                {/* Search Bar */}
+                <div className="flex gap-4 items-center">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by student name, ID, email, or course..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  <div className="flex gap-2">
+                    <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
+                      <SelectTrigger className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="name">Name</SelectItem>
+                        <SelectItem value="id">ID</SelectItem>
+                        <SelectItem value="email">Email</SelectItem>
+                        <SelectItem value="created">Created</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Button variant="outline" size="sm" onClick={toggleSort}>
+                      {sortOrder === 'asc' ? <SortAsc className="h-4 w-4" /> : <SortDesc className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+                
+                {/* Filters */}
+                <div className="flex gap-4 items-center">
+                  <span className="text-sm font-medium text-muted-foreground whitespace-nowrap">Filter by:</span>
+                  <Select value={filterCourse} onValueChange={setFilterCourse}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Course" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Courses</SelectItem>
+                      {uniqueCourses.map(course => (
+                        <SelectItem key={course} value={course}>{course}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterYear} onValueChange={setFilterYear}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Year" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Years</SelectItem>
+                      {uniqueYears.map(year => (
+                        <SelectItem key={year} value={year}>{year}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={filterSection} onValueChange={setFilterSection}>
+                    <SelectTrigger className="w-40">
+                      <SelectValue placeholder="Section" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Sections</SelectItem>
+                      {uniqueSections.map(section => (
+                        <SelectItem key={section} value={section}>{section}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {(filterCourse !== "all" || filterYear !== "all" || filterSection !== "all") && (
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      onClick={() => {
+                        setFilterCourse("all");
+                        setFilterYear("all");
+                        setFilterSection("all");
+                      }}
+                    >
+                      Clear Filters
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
