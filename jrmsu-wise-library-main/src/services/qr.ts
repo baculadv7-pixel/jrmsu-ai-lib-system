@@ -128,9 +128,7 @@ export type QRLoginData = {
   sessionToken: string;
   role: string;
   
-  // Legacy fields for backward compatibility
-  authCode?: string;
-  encryptedToken?: string;
+  // Legacy fields removed except optional 2FA setup key
   twoFactorKey?: string;
   twoFactorSetupKey?: string;
 };
@@ -222,26 +220,12 @@ export async function validateQRCodeData(qrData: string): Promise<{ isValid: boo
       };
     }
     
-    // Validate authentication token (sessionToken OR legacy fields)
+    // Require sessionToken only (legacy fields removed)
     const hasSessionToken = parsed.sessionToken;
-    const hasLegacyAuth = parsed.authCode || parsed.encryptedToken;
-    
-    if (!hasSessionToken && !hasLegacyAuth) {
+    if (!hasSessionToken) {
       return { 
         isValid: false, 
         error: "QR Code is missing required authentication token." 
-      };
-    }
-    
-    // Validate timestamp (QR codes expire after 30 minutes for security)
-    const qrTimestamp = parsed.timestamp;
-    const currentTime = Date.now();
-    const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
-    
-    if (currentTime - qrTimestamp > thirtyMinutes) {
-      return { 
-        isValid: false, 
-        error: "QR Code has expired. Please generate a new QR code from your profile." 
       };
     }
     

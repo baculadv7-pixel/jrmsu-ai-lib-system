@@ -11,6 +11,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { QRCodeLogin } from "@/components/auth/QRCodeLogin";
 import { WelcomeMessage, useWelcomeMessage } from "@/components/auth/WelcomeMessage";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -32,6 +33,8 @@ const Login = () => {
     } catch { return null; }
   })();
   const is2FAEnabled = Boolean(session?.twoFactorEnabled);
+  const [twoFARequired, setTwoFARequired] = useState(false);
+  const [twoFACode, setTwoFACode] = useState("");
 
   const adminIdRegex = /^KCL-\d{5}$/;
   const studentIdRegex = /^KC-\d{2}-[A-D]-\d{5}$/; // enforce exactly 5 digits at the end
@@ -70,34 +73,17 @@ const Login = () => {
         }
       }
       await signIn({ id: formData.id, password: formData.password, role: userType });
-      // If 2FA is enabled, require TOTP
-      const needsTotp = loginMethod === "manual" && userType && localStorage.getItem("jrmsu_auth_session");
-      if (needsTotp) {
-        try {
-          const session = JSON.parse(localStorage.getItem("jrmsu_auth_session") || "null");
-          if (session?.twoFactorEnabled) {
-            // rudimentary flow: ask for TOTP before navigating
-            if (!formData.totp) {
-              toast({ title: "Enter TOTP code", description: "Two-factor code required.", variant: "destructive" });
-              return;
-            }
-            const ok = verifyTotp(formData.totp);
-            if (!ok) {
-              toast({ title: "Invalid 2FA code", description: "Please try again.", variant: "destructive" });
-              return;
-            }
-          }
-        } catch (error) {
-          // Handle session parsing error
-          console.warn('Session parsing error:', error);
-        }
+      
+      // After signIn, re-check session for 2FA and show code request card if enabled
+      const updatedSession = JSON.parse(localStorage.getItem("jrmsu_auth_session") || "null");
+      if (loginMethod === "manual" && updatedSession?.twoFactorEnabled) {
+        setTwoFARequired(true);
+        setTwoFACode("");
+        return; // wait for 2FA verification before proceeding
       }
       
-      // Get user data from session after successful login
-      const updatedSession = JSON.parse(localStorage.getItem("jrmsu_auth_session") || "null");
+      // Proceed when 2FA not required
       const firstName = updatedSession?.firstName || "User";
-      
-      // Show welcome message with user's name
       showWelcome(firstName, userType);
     } catch (err: any) {
       toast({
@@ -221,20 +207,7 @@ const Login = () => {
                 </div>
               </div>
 
-              {/* Conditional TOTP field */}
-              {is2FAEnabled && (
-                <div className="space-y-2">
-                  <Label htmlFor="totp">2FA Code</Label>
-                  <Input
-                    id="totp"
-                    inputMode="numeric"
-                    placeholder="123456"
-                    value={formData.totp}
-                    onChange={(e) => setFormData({ ...formData, totp: e.target.value })}
-                    aria-label="Two-factor authentication code"
-                  />
-                </div>
-              )}
+              {/* Removed inline TOTP input to avoid duplicate 2FA UI; 2FA handled via dialog after login */}
 
               <div className="flex items-center justify-between text-sm">
                 <a href="#" className="text-primary hover:underline">
@@ -261,6 +234,66 @@ const Login = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* 2FA Authentication Code Request Card */}
+      <Dialog open={twoFARequired} onOpenChange={setTwoFARequired}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Two-Factor Authentication</DialogTitle>
+            <DialogDescription>
+              Enter the 6-digit code from your Google Authenticator app to continue.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="totp-code">2FA Code</Label>
+              <Input
+                id="totp-code"
+                inputMode="numeric"
+                placeholder="123456"
+                value={twoFACode}
+                onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, '').slice(0,6))}
+                className="text-center font-mono text-lg"
+                maxLength={6}
+                autoFocus
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" className="flex-1" onClick={() => setTwoFARequired(false)}>Cancel</Button>
+              <Button
+                className="flex-1"
+                disabled={twoFACode.length !== 6}
+                onClick={async () => {
+                  // Try Python verification with latest session secret first
+                  const session = (() => { try { return JSON.parse(localStorage.getItem("jrmsu_auth_session") || "null"); } catch { return null; } })();
+                  const secret = (session?.authKey || session?.twoFactorKey || '').toString();
+                  let ok = false;
+                  try {
+                    if (secret) {
+                      const r = await fetch('http://127.0.0.1:5001/2fa/verify', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ secret, token: twoFACode, window: 5 })
+                      });
+                      ok = r.ok && Boolean((await r.json())?.valid);
+                    }
+                  } catch {}
+                  if (!ok) ok = verifyTotp(twoFACode);
+                  if (!ok) {
+                    toast({ title: "Invalid 2FA code", description: "Please try again.", variant: "destructive" });
+                    return;
+                  }
+                  setTwoFARequired(false);
+                  const updatedSession = JSON.parse(localStorage.getItem("jrmsu_auth_session") || "null");
+                  const firstName = updatedSession?.firstName || "User";
+                  showWelcome(firstName, userType);
+                }}
+              >
+                Verify & Continue
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Welcome Message Overlay for manual login */}
       {userData && (

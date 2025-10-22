@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { authenticator } from "otplib";
+import { verifyTotpToken } from "@/utils/totp";
 import { databaseService, User } from "@/services/database";
 
 export type UserRole = "student" | "admin";
@@ -98,8 +98,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Invalid QR Code. Please scan a valid JRMSU Library System QR Code.");
     }
     
-    // Validate authentication token (new sessionToken OR legacy fields)
-    const hasAuth = qrData.sessionToken || qrData.authCode || qrData.encryptedToken;
+    // Validate authentication token (prefer encryptedPasswordToken; accept legacy sessionToken/encryptedToken)
+    const hasAuth = qrData.encryptedPasswordToken || qrData.sessionToken || qrData.encryptedToken || qrData.authCode;
     if (!hasAuth) {
       throw new Error("Invalid QR Code. Missing authentication token.");
     }
@@ -148,24 +148,45 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const enableTwoFactor = (authKey: string) => {
     if (!user) return;
-    const updated: AuthUser = { ...user, twoFactorEnabled: true, authKey };
+    const normalized = (authKey || '').toString().replace(/\s+/g, '').toUpperCase();
+    // Persist to database for accuracy across sessions
+    const dbUpdate = databaseService.updateUser(user.id, { twoFactorEnabled: true, twoFactorKey: normalized });
+    const persisted = dbUpdate.success && dbUpdate.user ? dbUpdate.user : { ...user, twoFactorEnabled: true, twoFactorKey: normalized };
+    const updated: AuthUser = { ...persisted, role: (persisted.userType as UserRole), authKey: persisted.twoFactorKey };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
     setUser(updated);
   };
 
   const disableTwoFactor = () => {
     if (!user) return;
-    const updated: AuthUser = { ...user, twoFactorEnabled: false, authKey: undefined };
+    // Persist to database for accuracy across sessions
+    const dbUpdate = databaseService.updateUser(user.id, { twoFactorEnabled: false, twoFactorKey: undefined });
+    const persisted = dbUpdate.success && dbUpdate.user ? dbUpdate.user : { ...user, twoFactorEnabled: false, twoFactorKey: undefined } as any;
+    const updated: AuthUser = { ...persisted, role: (persisted.userType as UserRole), authKey: undefined };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
     setUser(updated);
   };
 
   const verifyTotp = (token: string): boolean => {
-    if (!user?.twoFactorEnabled || !user?.authKey) return false;
+    // Load latest secret from context or session, normalize
+    const sessionRaw = localStorage.getItem(AUTH_STORAGE_KEY);
+    const session = (() => { try { return sessionRaw ? JSON.parse(sessionRaw) : null; } catch { return null; } })();
+    const secret = (user?.authKey || session?.authKey || session?.twoFactorKey || "").toString();
+    const enabled = Boolean(user?.twoFactorEnabled ?? session?.twoFactorEnabled);
+    if (!enabled || !secret) return false;
+
     try {
-      return authenticator.verify({ token, secret: user.authKey });
+      // Wider local window to tolerate clock drift
+      const localOk = verifyTotpToken(secret, token, [5, 5]);
+      // Fire-and-forget Python verification as a secondary check (non-blocking)
+      fetch("http://127.0.0.1:5001/2fa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ secret, token, window: 2 }),
+      }).catch(() => {});
+      return localOk;
     } catch {
-      return false;
+      return verifyTotpToken(secret, token, [5, 5]);
     }
   };
 

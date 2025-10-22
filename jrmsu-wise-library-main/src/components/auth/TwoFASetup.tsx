@@ -11,6 +11,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { QRCodeSVG } from "qrcode.react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
+import * as OTPAuth from 'otpauth';
+import { verifyTotpToken, currentTotpCode } from '@/utils/totp';
+import { pythonApi } from '@/services/pythonApi';
 
 interface TwoFactorData {
   secret: string;
@@ -31,7 +34,7 @@ export default function TwoFASetup({
   onToggle,
   requirePasswordVerification = true 
 }: TwoFASetupProps = {}) {
-  const { user, enableTwoFactor, disableTwoFactor, verifyTotp } = useAuth();
+  const { user, enableTwoFactor, disableTwoFactor } = useAuth();
   const { toast } = useToast();
   
   const [twoFactorData, setTwoFactorData] = useState<TwoFactorData | null>(null);
@@ -43,32 +46,38 @@ export default function TwoFASetup({
   const [currentAuthCode, setCurrentAuthCode] = useState("");
   const [showBackupCodes, setShowBackupCodes] = useState(false);
 
-  // Generate mock current auth code that updates every 30 seconds
+  // Generate real current auth code from user's saved secret
   useEffect(() => {
+    if (!user?.twoFactorEnabled || !user?.authKey) return;
     const updateAuthCode = () => {
-      const timestamp = Math.floor(Date.now() / 30000);
-      const code = (timestamp % 1000000).toString().padStart(6, '0');
-      setCurrentAuthCode(code);
+      const code = currentTotpCode(user.authKey!);
+      setCurrentAuthCode(code || "");
     };
-
     updateAuthCode();
-    const interval = setInterval(updateAuthCode, 30000);
-
+    const interval = setInterval(updateAuthCode, 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [user?.twoFactorEnabled, user?.authKey]);
 
   // Generate 2FA setup data
   const generateTwoFactorSetup = async (): Promise<TwoFactorData> => {
-    const secret = Array.from({ length: 16 }, () => 
-      'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'[Math.floor(Math.random() * 32)]
-    ).join('');
+    // Generate a Base32 secret (browser‑safe); otplib keyuri will encode correctly
+    const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+    const secret = Array.from({ length: 32 }, () => alphabet[Math.floor(Math.random() * alphabet.length)]).join('');
     
     const serviceName = "JRMSU Library";
     const accountName = user?.id || "user";
     const issuer = "JRMSU-LIBRARY";
     
-    // Generate Google Authenticator compatible URL
-    const otpauthUrl = `otpauth://totp/${encodeURIComponent(serviceName)}:${encodeURIComponent(accountName)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}`;
+    // Generate standard TOTP URL using OTPAuth
+    const totp = new OTPAuth.TOTP({
+      secret: OTPAuth.Secret.fromB32(secret),
+      algorithm: 'SHA1',
+      digits: 6,
+      period: 30,
+      label: accountName,
+      issuer,
+    });
+    const otpauthUrl = totp.toString();
     
     // Generate backup codes
     const backupCodes = Array.from({ length: 10 }, () => {
@@ -89,8 +98,34 @@ export default function TwoFASetup({
   const handleGenerateSetup = async () => {
     setIsGenerating(true);
     try {
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate API delay
-      const setupData = await generateTwoFactorSetup();
+      let setupData: TwoFactorData | null = null;
+      // Try Python API first for consistent secrets/URIs
+      const ok = await pythonApi.health();
+      if (ok) {
+        const resp = await fetch('http://127.0.0.1:5001/2fa/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ account: user?.id || 'user', issuer: 'JRMSU-LIBRARY' })
+        });
+        if (resp.ok) {
+          const j = await resp.json();
+          setupData = {
+            secret: j.secret,
+            qrCodeUrl: j.otpauth,
+            backupCodes: Array.from({ length: 10 }, () => {
+              const part1 = Math.random().toString(36).substring(2, 6).toUpperCase();
+              const part2 = Math.random().toString(36).substring(2, 6).toUpperCase();
+              return `${part1}-${part2}`;
+            }),
+            isEnabled: false,
+            setupComplete: false,
+          };
+        }
+      }
+      if (!setupData) {
+        // Fallback to local generator
+        setupData = await generateTwoFactorSetup();
+      }
       setTwoFactorData(setupData);
       setShowSetup(true);
       toast({
@@ -120,36 +155,35 @@ export default function TwoFASetup({
 
     setIsVerifying(true);
     try {
-      // Simulate verification (in real app, verify server-side)
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Mock verification - accept if code is 6 digits
-      if (verificationCode.length === 6) {
-        enableTwoFactor(twoFactorData.secret);
-        
-        const completedSetup = {
-          ...twoFactorData,
-          isEnabled: true,
-          setupComplete: true
-        };
-        
-        setTwoFactorData(completedSetup);
-        setShowBackupCodes(true);
-        
-        if (onSetupComplete) {
-          onSetupComplete(completedSetup);
-        }
-        
-        toast({
-          title: "2FA enabled successfully",
-          description: "Two-factor authentication is now active on your account."
-        });
-        
-        setVerificationCode("");
-        setShowSetup(false);
-      } else {
-        throw new Error("Invalid code");
+      // Verify with Python API first, fallback to local
+      let ok = await pythonApi.verifyTotp(twoFactorData.secret, verificationCode);
+      if (!ok) {
+        ok = verifyTotpToken(twoFactorData.secret, verificationCode, [10, 10]);
       }
+      if (!ok) throw new Error('Invalid code');
+
+      enableTwoFactor(twoFactorData.secret);
+      
+      const completedSetup = {
+        ...twoFactorData,
+        isEnabled: true,
+        setupComplete: true
+      };
+      
+      setTwoFactorData(completedSetup);
+      setShowBackupCodes(true);
+      
+      if (onSetupComplete) {
+        onSetupComplete(completedSetup);
+      }
+      
+      toast({
+        title: "2FA enabled successfully",
+        description: "Two-factor authentication is now active on your account."
+      });
+      
+      setVerificationCode("");
+      setShowSetup(false);
     } catch (error) {
       toast({
         title: "Verification failed",
@@ -311,12 +345,13 @@ export default function TwoFASetup({
               </div>
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="text-lg font-mono px-4 py-2 text-green-800 border-green-300">
-                  {currentAuthCode}
+                  {currentAuthCode || '------'}
                 </Badge>
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => copyToClipboard(currentAuthCode, "Authentication code")}
+                  onClick={() => currentAuthCode && copyToClipboard(currentAuthCode, "Authentication code")}
+                  disabled={!currentAuthCode}
                 >
                   <Copy className="h-4 w-4" />
                 </Button>

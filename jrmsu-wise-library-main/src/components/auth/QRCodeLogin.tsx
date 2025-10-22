@@ -60,7 +60,6 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps
           systemId: parsedData.systemId,
           systemTag: parsedData.systemTag,
           hasSessionToken: !!parsedData.sessionToken,
-          hasLegacyAuth: !!(parsedData.authCode || parsedData.encryptedToken),
           fullName: parsedData.fullName?.slice(0, 20) + '...' || 'N/A'
         });
       } catch (parseError) {

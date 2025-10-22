@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Download, RotateCcw, Lock } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import AdminLogo from "@/assets/JRMSU-KCL-removebg-preview.png";
+import StudentLogo from "@/assets/JRMSU-KCS-removebg-preview.png";
 
 // Database-like QR Code structure
 export interface QRCodeData {
@@ -25,19 +27,16 @@ interface UserQRData {
   systemId: "JRMSU-LIBRARY";
   systemTag: "JRMSU-KCL" | "JRMSU-KCS"; // JRMSU–KCL for Admins, JRMSU–KCS for Students
   timestamp: number;
-  sessionToken: string; // Single authentication token
+  // Authentication token field aligned with requirements (keep legacy sessionToken for compatibility)
+  encryptedPasswordToken?: string;
+  sessionToken?: string;
   role: string;
   
-  // OPTIONAL LEGACY FIELDS - for backward compatibility
-  authCode?: string; // Legacy authentication code
-  encryptedToken?: string; // Legacy encrypted token
-  realTimeAuthCode?: string; // Legacy name for authCode
-  encryptedPasswordToken?: string; // Legacy name for encryptedToken
-  twoFactorKey?: string; // 2FA setup key for Google Authenticator integration
-  twoFactorSetupKey?: string; // Legacy name for twoFactorKey
+  // OPTIONAL PROFILE FIELDS
   department?: string;
   course?: string;
   year?: string;
+  email?: string;
 }
 
 // Book QR Code encoded data structure
@@ -92,7 +91,8 @@ export function StableQRCode({
   const generateQRCodeData = (forceRegenerate = false): QRCodeData => {
     const fullName = `${userData.firstName} ${userData.middleName} ${userData.lastName}`.trim();
     const timestamp = Date.now();
-    const sessionToken = btoa(`${userId}-${timestamp}`);
+    // Generate an encrypted password token placeholder (back-end should replace with real hash)
+    const encryptedPasswordToken = btoa(`${userId}:${timestamp}`);
     
     // Streamlined QR data structure for better readability
     const userQRData: UserQRData = {
@@ -103,14 +103,12 @@ export function StableQRCode({
       systemId: "JRMSU-LIBRARY",
       systemTag: userType === "admin" ? "JRMSU-KCL" : "JRMSU-KCS",
       timestamp: timestamp,
-      sessionToken: sessionToken,
+      encryptedPasswordToken,
+      // Keep legacy sessionToken for backward compatibility
+      sessionToken: encryptedPasswordToken,
       role: userType === "admin" ? "Administrator" : "Student",
-      
-      // LEGACY COMPATIBILITY - only if 2FA is enabled
-      ...(twoFactorKey ? {
-        twoFactorKey,
-        twoFactorSetupKey: twoFactorKey
-      } : {})
+      // Optional profile context
+      email: userData.email,
     };
 
     // In real implementation, this would be encrypted
@@ -273,18 +271,18 @@ export function StableQRCode({
           <div className="p-4 bg-white rounded-lg border" id="stable-qr-code">
             <QRCodeSVG
               value={qrCodeData.qrCodeData}
-              size={256} // Increased size for better scanning
-              level="H" // Highest error correction for logo compatibility
+              size={256}
+              level="H" // High error correction for logo readability
               includeMargin={true}
               imageSettings={{
-                src: "/jrmsu-logo.jpg", // Add logo in center
-                height: 40, // Optimal size for H-level error correction
-                width: 40,  // Optimal size for H-level error correction  
-                excavate: true, // Creates empty space behind logo
-                x: undefined, // Center horizontally
-                y: undefined, // Center vertically
-                opacity: 1.0, // Full opacity logo
-                crossOrigin: "anonymous" // Allow cross-origin loading
+                src: userType === "admin" ? AdminLogo : StudentLogo,
+                height: 44,
+                width: 44,
+                excavate: true,
+                x: undefined,
+                y: undefined,
+                opacity: 1.0,
+                crossOrigin: "anonymous"
               }}
             />
           </div>
@@ -354,66 +352,36 @@ export function StableQRCode({
 // Utility function to validate JRMSU QR codes with enhanced error handling
 export const validateJRMSUQRCode = (qrData: string): { isValid: boolean; data?: UserQRData | BookQRData; error?: string } => {
   try {
-    // Check if QR data is empty or just whitespace
     if (!qrData || qrData.trim().length === 0) {
       return { isValid: false, error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." };
     }
-    
     const parsed = JSON.parse(qrData);
-    
-    // Check for required system tag
     if (!parsed.systemId || parsed.systemId !== "JRMSU-LIBRARY") {
       return { isValid: false, error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." };
     }
-    
     // Validate user QR code - check for all required fields
     if (parsed.fullName || parsed.userId || parsed.userType) {
-      const missingFields = [];
-      
+      const missingFields = [] as string[];
       if (!parsed.fullName) missingFields.push("fullName");
       if (!parsed.userId) missingFields.push("userId");
       if (!parsed.userType) missingFields.push("userType");
-      
-      // Check for authentication token (new sessionToken OR legacy fields)
-      const hasSessionToken = parsed.sessionToken;
-      const hasLegacyAuth = parsed.authCode || parsed.realTimeAuthCode || parsed.encryptedToken || parsed.encryptedPasswordToken;
-      
-      if (!hasSessionToken && !hasLegacyAuth) {
-        missingFields.push("sessionToken or legacy authentication fields");
-      }
-      
+      // Accept either encryptedPasswordToken (preferred) or sessionToken (legacy)
+      const hasAuthToken = Boolean(parsed.encryptedPasswordToken || parsed.sessionToken || parsed.encryptedToken);
+      if (!hasAuthToken) missingFields.push("encryptedPasswordToken");
       if (!parsed.systemTag) missingFields.push("systemTag");
       if (!parsed.systemId) missingFields.push("systemId");
-      
-      // Role is optional in new structure since it can be derived from userType
-      // if (!parsed.role) missingFields.push("role");
-      
       if (missingFields.length > 0) {
         console.warn('QR Code validation failed - missing fields:', missingFields);
-        return { 
-          isValid: false, 
-          error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
-        };
+        return { isValid: false, error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." };
       }
-      
-      // Validate user type
       if (!['admin', 'student'].includes(parsed.userType)) {
-        return { 
-          isValid: false, 
-          error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
-        };
+        return { isValid: false, error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." };
       }
-      
-      // Validate system tag matches user type
       const expectedSystemTag = parsed.userType === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS';
       if (parsed.systemTag !== expectedSystemTag) {
         console.warn(`QR Code validation failed - incorrect system tag: expected ${expectedSystemTag}, got ${parsed.systemTag}`);
-        return { 
-          isValid: false, 
-          error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." 
-        };
+        return { isValid: false, error: "⚠️ Invalid QR Code. Please scan a valid JRMSU Library System QR Code." };
       }
-      
       return { isValid: true, data: parsed as UserQRData };
     }
     

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -18,6 +18,10 @@ const Settings = () => {
   const userType: "student" | "admin" = user?.role ?? "student";
   const { toast } = useToast();
   const [twoFactorEnabled, setTwoFactorEnabled] = useState(Boolean(user?.twoFactorEnabled));
+  // Keep local toggle in sync with persisted user state
+  useEffect(() => {
+    setTwoFactorEnabled(Boolean(user?.twoFactorEnabled));
+  }, [user?.twoFactorEnabled]);
   const [emailAuth, setEmailAuth] = useState(true);
   const [smsAuth, setSmsAuth] = useState(false);
 
@@ -98,7 +102,7 @@ const Settings = () => {
 
                 {twoFactorEnabled && (
                   <div className="space-y-4 pl-4 border-l-2 border-primary/20">
-                    <TwoFASetup />
+                    <TwoFASetup onSetupComplete={() => setTwoFactorEnabled(true)} />
                     <div className="flex items-center justify-between p-4 bg-background rounded-lg border">
                       <div className="flex items-center gap-3">
                         <Mail className="h-5 w-5 text-accent" />

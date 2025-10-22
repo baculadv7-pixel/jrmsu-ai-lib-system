@@ -45,7 +45,7 @@ const EnhancedProfile = () => {
           setQrEnvelope(resp.envelope);
         } catch (error) {
           console.error('Failed to generate QR code:', error);
-          // Fallback: Generate QR manually with minimal structure + 2FA
+          // Fallback: Generate QR manually with required structure (no 2FA/real-time codes)
           const fallbackQRData = JSON.stringify({
             fullName: user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
             userId: user.id,
@@ -53,13 +53,8 @@ const EnhancedProfile = () => {
             systemId: 'JRMSU-LIBRARY',
             systemTag: user.role === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
             timestamp: Date.now(),
-            sessionToken: btoa(`${user.id}-${Date.now()}`),
-            
-            // RESTORE 2FA setup key for Google Authenticator
-            ...(user.twoFactorKey ? {
-              twoFactorKey: user.twoFactorKey,
-              twoFactorSetupKey: user.twoFactorKey
-            } : {})
+            encryptedPasswordToken: btoa(`${user.id}-${Date.now()}`),
+            email: user.email
           });
           setQrEnvelope(fallbackQRData);
         }

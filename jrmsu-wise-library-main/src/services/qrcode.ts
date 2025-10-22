@@ -10,7 +10,6 @@ export interface QRCodeData {
   role?: string;
   encryptedPasswordToken: string;
   twoFactorSetupKey: string;
-  realTimeAuthCode: string;
   systemTag: string;
 }
 
@@ -29,10 +28,8 @@ class QRCodeService {
         role: data.role || `${data.course} - Year ${data.year}`,
         encryptedPasswordToken: data.encryptedPasswordToken,
         twoFactorSetupKey: data.twoFactorSetupKey,
-        realTimeAuthCode: data.realTimeAuthCode,
         systemTag: data.systemTag,
-        systemId: "JRMSU-LIBRARY",
-        timestamp: Date.now()
+        systemId: "JRMSU-LIBRARY"
       };
 
       // Convert to JSON string
@@ -46,7 +43,7 @@ class QRCodeService {
           dark: '#000000',
           light: '#FFFFFF'
         },
-        errorCorrectionLevel: 'H' // High error correction for logo overlay compatibility
+        errorCorrectionLevel: 'M' // Medium error correction = fewer modules while remaining reliable
       });
 
       return qrCodeDataUrl;
@@ -69,10 +66,8 @@ class QRCodeService {
         role: data.role || `${data.course} - Year ${data.year}`,
         encryptedPasswordToken: data.encryptedPasswordToken,
         twoFactorSetupKey: data.twoFactorSetupKey,
-        realTimeAuthCode: data.realTimeAuthCode,
         systemTag: data.systemTag,
-        systemId: "JRMSU-LIBRARY",
-        timestamp: Date.now()
+        systemId: "JRMSU-LIBRARY"
       };
 
       const qrString = JSON.stringify(qrData);
@@ -85,7 +80,7 @@ class QRCodeService {
           dark: '#000000',
           light: '#FFFFFF'
         },
-        errorCorrectionLevel: 'H' // High error correction for logo overlay compatibility
+        errorCorrectionLevel: 'M' // Medium error correction = fewer modules while remaining reliable
       });
 
       return canvas;
@@ -121,9 +116,6 @@ class QRCodeService {
       errors.push('Two-factor setup key is required');
     }
 
-    if (!data.realTimeAuthCode?.trim()) {
-      errors.push('Real-time auth code is required');
-    }
 
     if (!data.systemTag?.trim()) {
       errors.push('System tag is required');
@@ -154,8 +146,7 @@ class QRCodeService {
   } {
     return {
       encryptedPasswordToken: this.generateRandomString(32),
-      twoFactorSetupKey: this.generateRandomString(16),
-      realTimeAuthCode: this.generateRandomString(6, true)
+      twoFactorSetupKey: this.generateRandomString(16)
     };
   }
 

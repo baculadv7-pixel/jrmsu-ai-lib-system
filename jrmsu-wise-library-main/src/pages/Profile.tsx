@@ -24,7 +24,7 @@ const Profile = () => {
           setQrEnvelope(resp.envelope);
         } catch (error) {
           console.error('Failed to generate QR code:', error);
-          // Fallback: Generate QR manually with proper structure
+          // Fallback: Generate QR manually with required structure (no 2FA/real-time codes)
           const fallbackQRData = JSON.stringify({
             fullName: user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
             userId: user.id,
@@ -33,12 +33,8 @@ const Profile = () => {
             course: user.course,
             year: user.year,
             role: user.role === 'admin' ? 'Administrator' : 'Student',
-            authCode: Math.random().toString().slice(2, 8),
-            encryptedToken: btoa(`${user.id}-${Date.now()}`),
-            twoFactorKey: user.twoFactorKey,
-            realTimeAuthCode: Math.random().toString().slice(2, 8),
+            email: user.email,
             encryptedPasswordToken: btoa(`${user.id}-${Date.now()}`),
-            twoFactorSetupKey: user.twoFactorKey,
             systemTag: user.role === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
             timestamp: Date.now(),
             systemId: 'JRMSU-LIBRARY'
@@ -162,7 +158,7 @@ const Profile = () => {
                             setQrEnvelope(resp.envelope);
                           } catch (error) {
                             console.error('Failed to regenerate QR code:', error);
-                            // Fallback: Generate new QR manually
+                            // Fallback: Generate new QR manually (no 2FA/real-time codes)
                             const fallbackQRData = JSON.stringify({
                               fullName: user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
                               userId: user.id,
@@ -171,12 +167,8 @@ const Profile = () => {
                               course: user.course,
                               year: user.year,
                               role: user.role === 'admin' ? 'Administrator' : 'Student',
-                              authCode: Math.random().toString().slice(2, 8),
-                              encryptedToken: btoa(`${user.id}-${Date.now()}`),
-                              twoFactorKey: user.twoFactorKey,
-                              realTimeAuthCode: Math.random().toString().slice(2, 8),
+                              email: user.email,
                               encryptedPasswordToken: btoa(`${user.id}-${Date.now()}`),
-                              twoFactorSetupKey: user.twoFactorKey,
                               systemTag: user.role === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
                               timestamp: Date.now(),
                               systemId: 'JRMSU-LIBRARY'

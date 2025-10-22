@@ -47,6 +47,18 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
   const initTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
+  // Overlay canvas for dynamic detection frame
+  const overlayCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // DOM-based bounding box (for Tailwind transitions)
+  const [box, setBox] = useState<{ left: number; top: number; width: number; height: number } | null>(null);
+  const [showDetectedMsg, setShowDetectedMsg] = useState(false);
+  const [highlight, setHighlight] = useState(false);
+  const hasDetectionRef = useRef(false);
+  const loginTriggeredRef = useRef(false);
+  const trackUntilRef = useRef<number>(0);
+  const pendingDataRef = useRef<string | null>(null);
+  const pendingSinceRef = useRef<number>(0);
+  const stableCountRef = useRef<number>(0);
 
   // Log diagnostics to localStorage for postmortem analysis
   const logDiagnostics = (info: Partial<DiagnosticsInfo>) => {
@@ -261,12 +273,18 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
     const maxAttempts = 3;
     console.log(`🎥 Starting QR scanner (attempt ${attemptNumber}/${maxAttempts})...`);
     
-    if (attemptNumber === 1) {
-      setIsInitializing(true);
-      setError(null);
-      setRetryCount(0);
-      setShowRestartButton(false);
-    }
+      if (attemptNumber === 1) {
+        setIsInitializing(true);
+        setError(null);
+        setRetryCount(0);
+        setShowRestartButton(false);
+        hasDetectionRef.current = false;
+        loginTriggeredRef.current = false;
+        pendingDataRef.current = null;
+        pendingSinceRef.current = 0;
+        stableCountRef.current = 0;
+        setShowDetectedMsg(false);
+      }
     
     try {
       // Security and compatibility checks
@@ -334,22 +352,19 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
       // SIMPLE RELIABLE scanner configuration - focus on WORKING not features
       const scannerConfig = {
         fps: 10, // Lower FPS for reliability
-        qrbox: 250, // Fixed size box for consistent detection
+        // qrbox removed so the library doesn't render white corner frame
         aspectRatio: 1.0,
         disableFlip: false,
         
-        // SIMPLE settings that actually work
         supportedScanTypes: [Html5QrcodeScanType.SCAN_TYPE_CAMERA],
         useBarCodeDetectorIfSupported: true,
         
-        // Basic video constraints
         videoConstraints: {
           width: { ideal: 640 },
           height: { ideal: 480 },
           frameRate: { ideal: 15 }
         },
         
-        // Keep it simple
         formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
         verbose: true // Keep logging
       };
@@ -463,7 +478,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
       setTimeout(() => {
         const container = document.getElementById('qr-scanner-container');
         if (container) {
-          const videoElement = container.querySelector('video');
+          const videoElement = container.querySelector('video') as HTMLVideoElement | null;
           if (videoElement) {
             videoElement.style.width = '100%';
             videoElement.style.height = '100%';
@@ -471,6 +486,15 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
             videoElement.style.display = 'block';
             videoElement.style.visibility = 'visible';
             console.log('📹 Video element forced to display:', videoElement);
+            // Size overlay canvas to match intrinsic video resolution for accurate overlay
+            const canvas = overlayCanvasRef.current;
+            if (canvas) {
+              canvas.width = videoElement.videoWidth || 640;
+              canvas.height = videoElement.videoHeight || 480;
+              // Stretch to container visually
+              canvas.style.width = '100%';
+              canvas.style.height = '100%';
+            }
           } else {
             console.warn('⚠️ Video element not found in container');
           }
@@ -510,23 +534,76 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
                 inversionAttempts: "dontInvert",
               });
               
-              if (qrResult && qrResult.data) {
-                console.log('🎉 jsQR SUCCESS! Decoded QR code data:', qrResult.data);
-                scanningActive = false; // Stop scanning
-                clearInterval(jsQRDetection);
-                
-                // Call the success callback with the decoded data
-                onScanSuccessCallback(qrResult.data, { 
-                  format: { formatName: 'QR_CODE' },
-                  location: qrResult.location 
+              // Compute DOM bounding box for Tailwind-animated overlay
+              const overlay = overlayCanvasRef.current;
+              const containerEl = document.getElementById('qr-scanner-container');
+              if (overlay && containerEl && qrResult?.location) {
+                const loc = qrResult.location as any;
+                const xs = [loc.topLeftCorner.x, loc.topRightCorner.x, loc.bottomRightCorner.x, loc.bottomLeftCorner.x];
+                const ys = [loc.topLeftCorner.y, loc.topRightCorner.y, loc.bottomRightCorner.y, loc.bottomLeftCorner.y];
+                const minX = Math.min(...xs);
+                const maxX = Math.max(...xs);
+                const minY = Math.min(...ys);
+                const maxY = Math.max(...ys);
+                // Ensure overlay sized
+                if (overlay.width === 0 || overlay.height === 0) {
+                  overlay.width = video.videoWidth;
+                  overlay.height = video.videoHeight;
+                }
+                const scaleX = containerEl.clientWidth / (overlay.width || 1);
+                const scaleY = containerEl.clientHeight / (overlay.height || 1);
+                setBox({
+                  left: Math.max(0, minX * scaleX),
+                  top: Math.max(0, minY * scaleY),
+                  width: Math.max(8, (maxX - minX) * scaleX),
+                  height: Math.max(8, (maxY - minY) * scaleY),
                 });
+              }
+
+              if (qrResult && qrResult.data) {
+                // Start/continue a stability window before confirming login
+                const now = Date.now();
+                if (pendingDataRef.current !== qrResult.data) {
+                  pendingDataRef.current = qrResult.data;
+                  pendingSinceRef.current = now;
+                  stableCountRef.current = 1;
+                } else {
+                  stableCountRef.current += 1;
+                }
+
+                // Move first (box already tracking), then confirm success after stability
+                const stableTimeMs = now - (pendingSinceRef.current || now);
+                const enoughFrames = stableCountRef.current >= 3; // ~240ms at 80ms interval
+                const enoughTime = stableTimeMs >= 400; // at least 0.4s of consistent data
+                if (!loginTriggeredRef.current && (enoughFrames || enoughTime)) {
+                  console.log('🎉 jsQR STABLE decode, confirming...');
+                  hasDetectionRef.current = true;
+                  // Brief highlight + feedback and keep tracking for a moment
+                  setHighlight(true);
+                  setShowDetectedMsg(true);
+                  setTimeout(() => setHighlight(false), 800);
+                  setTimeout(() => setShowDetectedMsg(false), 1800);
+
+                  loginTriggeredRef.current = true;
+                  trackUntilRef.current = Date.now() + 1200; // keep overlay tracking ~1.2s
+                  onScanSuccessCallback(qrResult.data, { 
+                    format: { formatName: 'QR_CODE' },
+                    location: qrResult.location 
+                  });
+                }
+              }
+
+              // Stop updater shortly after success, else continue tracking
+              if (loginTriggeredRef.current && Date.now() > trackUntilRef.current) {
+                scanningActive = false;
+                clearInterval(jsQRDetection);
               }
             }
           }
         } catch (error) {
           console.debug('jsQR detection failed:', error);
         }
-      }, 100); // Check every 100ms for faster detection
+      }, 80); // frequent updates for smooth tracking
       
       // Clean up jsQR interval when scanner stops
       const originalStop = html5QrCodeRef.current.stop;
@@ -698,6 +775,18 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
       };
     }
   }, [isActive, isInitializing]);
+
+  // Centered idle bounding box until detection begins
+  useEffect(() => {
+    if (!isActive || hasDetectionRef.current) return;
+    const container = document.getElementById('qr-scanner-container');
+    if (!container) return;
+    const cw = container.clientWidth, ch = container.clientHeight;
+    const size = Math.min(cw, ch) * 0.45; // 45% of the smaller dimension
+    const x = (cw - size) / 2;
+    const y = (ch - size) / 2;
+    setBox({ left: x, top: y, width: size, height: size });
+  }, [isActive]);
 
   return (
     <div className="space-y-4">
@@ -899,32 +988,64 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
                 </div>
               )}
               
-              {/* Scanning Overlay - Display only, detection works everywhere in frame */}
+              {/* Scanning Overlay - dynamic tracking box */}
               {isActive && (
-                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                  {/* Visual guide frame - detection works anywhere in camera view */}
-                  <div className="border-2 border-white border-dashed rounded-lg w-56 h-56 flex items-center justify-center animate-pulse opacity-70">
-                    <div className="text-white text-sm font-medium bg-black bg-opacity-60 px-3 py-2 rounded-lg animate-pulse">
-                      Point camera at QR code
+                <div className="absolute inset-0 pointer-events-none">
+                  <canvas ref={overlayCanvasRef} className="absolute inset-0 w-full h-full" />
+
+                  {/* Static white edge corners fitted to camera container edges */}
+                  <div className="absolute inset-0">
+                    {/* top-left */}
+                    <div className="absolute top-2 left-2">
+                      <div className="w-10 h-[3px] bg-white" />
+                      <div className="w-[3px] h-10 bg-white" />
+                    </div>
+                    {/* top-right */}
+                    <div className="absolute top-2 right-2">
+                      <div className="w-10 h-[3px] bg-white" />
+                      <div className="w-[3px] h-10 bg-white absolute right-0 top-0" />
+                    </div>
+                    {/* bottom-left */}
+                    <div className="absolute bottom-2 left-2">
+                      <div className="w-[3px] h-10 bg-white" />
+                      <div className="w-10 h-[3px] bg-white" />
+                    </div>
+                    {/* bottom-right */}
+                    <div className="absolute bottom-2 right-2">
+                      <div className="w-[3px] h-10 bg-white absolute right-0 bottom-0" />
+                      <div className="w-10 h-[3px] bg-white" />
                     </div>
                   </div>
-                  
-                  {/* Corner indicators - purely visual, detection works anywhere */}
-                  <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-                    <div className="relative w-56 h-56">
-                      <div className="absolute top-0 left-0 w-10 h-10 border-l-4 border-t-4 border-green-400 animate-pulse opacity-80"></div>
-                      <div className="absolute top-0 right-0 w-10 h-10 border-r-4 border-t-4 border-green-400 animate-pulse opacity-80"></div>
-                      <div className="absolute bottom-0 left-0 w-10 h-10 border-l-4 border-b-4 border-green-400 animate-pulse opacity-80"></div>
-                      <div className="absolute bottom-0 right-0 w-10 h-10 border-r-4 border-b-4 border-green-400 animate-pulse opacity-80"></div>
+
+                  {/* Colored dynamic box: idle centered, moves to detected QR */}
+                  {box && (
+                    <div
+                      className={`absolute transition-all duration-150 ease-out ${highlight ? 'ring-2 ring-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.7)]' : ''}`}
+                      style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+                    >
+                      {/* Corner decorations with specified colors */}
+                      {/* Top-left (blue) */}
+                      <div className="absolute top-0 left-0">
+                        <div className="w-8 h-[3px] bg-blue-400 animate-pulse" />
+                        <div className="w-[3px] h-8 bg-blue-400 animate-pulse" />
+                      </div>
+                      {/* Top-right (yellow) */}
+                      <div className="absolute top-0 right-0">
+                        <div className="w-8 h-[3px] bg-yellow-400 animate-pulse" />
+                        <div className="w-[3px] h-8 bg-yellow-400 animate-pulse absolute right-0 top-0" />
+                      </div>
+                      {/* Bottom-left (yellow) */}
+                      <div className="absolute bottom-0 left-0">
+                        <div className="w-[3px] h-8 bg-yellow-400 animate-pulse absolute left-0 bottom-0" />
+                        <div className="w-8 h-[3px] bg-yellow-400 animate-pulse" />
+                      </div>
+                      {/* Bottom-right (blue) */}
+                      <div className="absolute bottom-0 right-0">
+                        <div className="w-[3px] h-8 bg-blue-400 animate-pulse absolute right-0 bottom-0" />
+                        <div className="w-8 h-[3px] bg-blue-400 animate-pulse" />
+                      </div>
                     </div>
-                  </div>
-                  
-                  {/* Status indicator */}
-                  <div className="absolute top-4 left-1/2 transform -translate-x-1/2">
-                    <div className="bg-blue-600 text-white px-4 py-2 rounded-full text-sm font-medium animate-pulse">
-                      📷 Scanning for QR codes...
-                    </div>
-                  </div>
+                  )}
                 </div>
               )}
             </div>
@@ -933,9 +1054,11 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
             {(isActive || isInitializing) && (
               <div className="space-y-3">
                 <p className="text-sm text-gray-700 font-medium">
-                  {isActive ? "🎥 Camera is active! Position your QR code in the frame above." : "⏳ Initializing camera..."}
+                  {isActive ? "🎥 Camera is active!" : "⏳ Initializing camera..."}
                 </p>
-                
+                {showDetectedMsg && (
+                  <div className="text-center text-sm text-green-600">✅ QR Code Detected</div>
+                )}
                 {isActive && (
                 <div className="flex gap-2 justify-center flex-wrap">
                   <Button onClick={stopScanner} variant="outline" size="sm">

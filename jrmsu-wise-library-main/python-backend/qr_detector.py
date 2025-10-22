@@ -91,25 +91,55 @@ class QRDetector:
     
     def detect_qr_codes(self, frame: np.ndarray) -> list:
         """
-        Detect QR codes in the given frame
-        
-        Args:
-            frame: OpenCV image frame
-            
-        Returns:
-            List of detected QR codes with data and positions
+        Detect QR codes in the given frame with retry strategy
         """
         try:
-            # Convert to grayscale for better detection
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-            
-            # Apply slight blur to reduce noise
-            gray = cv2.GaussianBlur(gray, (3, 3), 0)
-            
-            # Detect QR codes using pyzbar
-            qr_codes = pyzbar.decode(gray)
-            
             detected_codes = []
+            # Pipeline 1: grayscale + light blur
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray_blur = cv2.GaussianBlur(gray, (3, 3), 0)
+            qr_codes = pyzbar.decode(gray_blur)
+            
+            # Retry Pipeline 2: adaptive threshold if none found
+            if not qr_codes:
+                th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                           cv2.THRESH_BINARY, 31, 2)
+                qr_codes = pyzbar.decode(th)
+            
+            # Retry Pipeline 3: resize scales if still none
+            if not qr_codes:
+                for scale in [1.25, 1.5, 2.0]:
+                    resized = cv2.resize(gray_blur, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                    qr_codes = pyzbar.decode(resized)
+                    if qr_codes:
+                        break
+            
+            for qr in qr_codes:
+                # Extract QR code data
+                try:
+                    qr_data = qr.data.decode('utf-8')
+                except Exception:
+                    continue
+                qr_type = getattr(qr, 'type', 'QRCODE')
+                # Get bounding box
+                (x, y, w, h) = qr.rect
+                # Get corner points
+                points = getattr(qr, 'polygon', [])
+                if len(points) == 4:
+                    corners = [(point.x, point.y) for point in points]
+                else:
+                    corners = [(x, y), (x + w, y), (x + w, y + h), (x, y + h)]
+                detected_codes.append({
+                    'data': qr_data,
+                    'type': qr_type,
+                    'bbox': (x, y, w, h),
+                    'corners': corners,
+                    'timestamp': time.time()
+                })
+            return detected_codes
+        except Exception as e:
+            logger.error(f"QR detection error: {e}")
+            return []
             for qr in qr_codes:
                 # Extract QR code data
                 qr_data = qr.data.decode('utf-8')
@@ -143,39 +173,24 @@ class QRDetector:
     
     def validate_jrmsu_qr(self, qr_data: str) -> Dict[str, Any]:
         """
-        Validate if QR code is a valid JRMSU Library System code
-        
-        Args:
-            qr_data: QR code data string
-            
-        Returns:
-            Validation result with isValid flag and parsed data
+        Validate if QR code is a valid JRMSU Library System code (no expiration check)
         """
         try:
-            # Try to parse as JSON
             data = json.loads(qr_data)
-            
-            # Check for required JRMSU fields
-            required_fields = ['systemId', 'userId', 'timestamp']
+            # Required fields based on login requirements
+            required_fields = ['systemId', 'userId', 'fullName', 'userType', 'systemTag']
             if not all(field in data for field in required_fields):
                 return {'isValid': False, 'error': 'Missing required fields'}
-            
-            # Validate system ID
             if data.get('systemId') != 'JRMSU-LIBRARY':
                 return {'isValid': False, 'error': 'Invalid system ID'}
-            
-            # Validate timestamp (not too old)
-            current_time = time.time()
-            qr_timestamp = data.get('timestamp', 0)
-            if current_time - qr_timestamp > 300:  # 5 minutes
-                return {'isValid': False, 'error': 'QR code expired'}
-            
-            return {
-                'isValid': True,
-                'data': data,
-                'validatedAt': current_time
-            }
-            
+            # Accept either encryptedPasswordToken or sessionToken/encryptedToken
+            if not any(k in data for k in ['encryptedPasswordToken', 'sessionToken', 'encryptedToken']):
+                return {'isValid': False, 'error': 'Missing authentication token'}
+            # Basic userType/systemTag consistency
+            expected_tag = 'JRMSU-KCL' if data.get('userType') == 'admin' else 'JRMSU-KCS'
+            if data.get('systemTag') != expected_tag:
+                return {'isValid': False, 'error': 'System tag/user type mismatch'}
+            return {'isValid': True, 'data': data, 'validatedAt': time.time()}
         except json.JSONDecodeError:
             return {'isValid': False, 'error': 'Invalid JSON format'}
         except Exception as e:

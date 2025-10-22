@@ -152,6 +152,8 @@ class DatabaseService {
       this.saveUsers(sampleUsers);
       console.log(`✅ Sample database initialized with ${sampleUsers.length} users`);
     }
+    // Ensure all users have standardized QR structures
+    this.migrateUsersToStandardQR();
   }
   
   // Simple password hashing (use proper encryption in production)
@@ -170,6 +172,57 @@ class DatabaseService {
     }
   }
   
+  // Migration: standardize QR structure for all users
+  private migrateUsersToStandardQR(): void {
+    const users = this.getAllUsers();
+    let changed = 0;
+    const updated = users.map(u => {
+      try {
+        const needs = !u.qrCodeData || !this.isStandardQR(JSON.parse(u.qrCodeData));
+        if (needs) {
+          const qr = this.buildStandardUserQR(u);
+          u.qrCodeData = JSON.stringify(qr);
+          u.qrCodeGeneratedAt = new Date();
+          changed++;
+        }
+      } catch {
+        const qr = this.buildStandardUserQR(u);
+        u.qrCodeData = JSON.stringify(qr);
+        u.qrCodeGeneratedAt = new Date();
+        changed++;
+      }
+      return u;
+    });
+    if (changed > 0) {
+      this.saveUsers(updated);
+      console.log(`🔄 Migrated ${changed} user QR records to standardized structure`);
+    }
+  }
+
+  private isStandardQR(obj: any): boolean {
+    return Boolean(
+      obj && obj.systemId === 'JRMSU-LIBRARY' && obj.userId && obj.fullName && obj.userType && obj.systemTag && (obj.encryptedPasswordToken || obj.sessionToken)
+    );
+  }
+
+  private buildStandardUserQR(u: User): any {
+    const token = btoa(`${u.id}-${Date.now()}`);
+    return {
+      fullName: u.fullName,
+      userId: u.id,
+      userType: u.userType,
+      systemId: 'JRMSU-LIBRARY',
+      systemTag: u.systemTag,
+      timestamp: Date.now(),
+      encryptedPasswordToken: token,
+      email: u.email,
+      department: u.department,
+      course: u.course,
+      year: u.year,
+      role: u.userType === 'admin' ? 'Administrator' : 'Student'
+    };
+  }
+
   // User CRUD operations
   getAllUsers(): User[] {
     try {
@@ -405,15 +458,12 @@ class DatabaseService {
     
     console.log('✅ Step 9 passed: Role matches user type');
     
-    // Check timestamp for expiration (QR codes expire after 30 minutes)
+    // Timestamp present but NO expiration enforcement (made non-expiring for accuracy and usability)
     if (qrData.timestamp) {
       const qrTimestamp = qrData.timestamp;
       const currentTime = Date.now();
-      const thirtyMinutes = 30 * 60 * 1000; // 30 minutes in milliseconds
-      
-      if (currentTime - qrTimestamp > thirtyMinutes) {
-        return { success: false, error: "QR code has expired - please generate a new one" };
-      }
+      const ageMinutes = ((currentTime - qrTimestamp) / 60000).toFixed(1);
+      console.log(`ℹ️ QR timestamp age: ${ageMinutes} minutes (no expiration enforced)`);
     }
     
     // 🔓 2FA DISABLED FOR TESTING - Skip 2FA verification
