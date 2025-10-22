@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Shield, Smartphone, Key, Copy, RefreshCw, CheckCircle, AlertTriangle } from "lucide-react";
+import { Shield, Smartphone, Key, Copy, RefreshCw, CheckCircle, AlertTriangle, Eye, EyeOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,6 +14,7 @@ import { useAuth } from "@/context/AuthContext";
 import * as OTPAuth from 'otpauth';
 import { verifyTotpToken, currentTotpCode } from '@/utils/totp';
 import { pythonApi } from '@/services/pythonApi';
+import { databaseService } from '@/services/database';
 
 interface TwoFactorData {
   secret: string;
@@ -45,6 +46,13 @@ export default function TwoFASetup({
   const [showSetup, setShowSetup] = useState(false);
   const [currentAuthCode, setCurrentAuthCode] = useState("");
   const [showBackupCodes, setShowBackupCodes] = useState(false);
+
+  // Disable 2FA form state
+  const [disablePw, setDisablePw] = useState("");
+  const [disablePw2, setDisablePw2] = useState("");
+  const [showPw1, setShowPw1] = useState(false);
+  const [showPw2, setShowPw2] = useState(false);
+  const disableValid = disablePw.length > 0 && disablePw === disablePw2;
 
   // Generate real current auth code from user's saved secret
   useEffect(() => {
@@ -200,36 +208,8 @@ export default function TwoFASetup({
       // Enable 2FA - generate setup
       await handleGenerateSetup();
     } else {
-      // Disable 2FA - require password verification
-      if (requirePasswordVerification && !password) {
-        toast({
-          title: "Password required",
-          description: "Please enter your password to disable 2FA.",
-          variant: "destructive"
-        });
-        return;
-      }
-      
-      try {
-        disableTwoFactor();
-        setTwoFactorData(null);
-        setPassword("");
-        
-        if (onToggle) {
-          onToggle(false);
-        }
-        
-        toast({
-          title: "2FA disabled",
-          description: "Two-factor authentication has been disabled."
-        });
-      } catch (error) {
-        toast({
-          title: "Failed to disable 2FA",
-          description: "Please check your password and try again.",
-          variant: "destructive"
-        });
-      }
+      // Show disable form; actual disable happens on button click after password match
+      setShowSetup(false);
     }
   };
 
@@ -336,24 +316,56 @@ export default function TwoFASetup({
             />
           </div>
 
-          {/* Current Auth Code (if enabled) */}
+          {/* When enabled: require password + confirm to disable */}
           {user?.twoFactorEnabled && (
-            <div className="flex items-center justify-between p-4 bg-green-50 rounded-lg border border-green-200">
-              <div>
-                <p className="font-medium text-green-800">Current Authentication Code</p>
-                <p className="text-sm text-green-600">Updates every 30 seconds</p>
+            <div className="space-y-3 p-4 bg-muted/50 rounded-lg border">
+              <p className="font-medium">Disable 2FA</p>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="relative">
+                  <Label>Enter Password</Label>
+                  <Input
+                    type={showPw1 ? 'text' : 'password'}
+                    value={disablePw}
+                    onChange={(e) => setDisablePw(e.target.value)}
+                    placeholder="Enter your password"
+                  />
+<button type="button" className="absolute right-3 bottom-2 text-muted-foreground" onClick={() => setShowPw1(!showPw1)}>
+                    {showPw1 ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+                <div className="relative">
+                  <Label>Confirm Password</Label>
+                  <Input
+                    type={showPw2 ? 'text' : 'password'}
+                    value={disablePw2}
+                    onChange={(e) => setDisablePw2(e.target.value)}
+                    placeholder="Re-enter your password"
+                  />
+<button type="button" className="absolute right-3 bottom-2 text-muted-foreground" onClick={() => setShowPw2(!showPw2)}>
+                    {showPw2 ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                <Badge variant="outline" className="text-lg font-mono px-4 py-2 text-green-800 border-green-300">
-                  {currentAuthCode || '------'}
-                </Badge>
+              <div className="flex justify-end">
                 <Button
                   variant="outline"
-                  size="icon"
-                  onClick={() => currentAuthCode && copyToClipboard(currentAuthCode, "Authentication code")}
-                  disabled={!currentAuthCode}
+                  disabled={!disableValid}
+                  onClick={() => {
+                    if (!user) return;
+                    const ok = databaseService.verifyUserPassword(user.id, disablePw);
+                    if (!ok) {
+                      toast({ title: 'Password incorrect', description: 'Please check your password and try again.', variant: 'destructive' });
+                      return;
+                    }
+                    disableTwoFactor();
+                    setTwoFactorData(null);
+                    setDisablePw('');
+                    setDisablePw2('');
+                    toast({ title: '2FA disabled', description: 'Two-factor authentication has been disabled.' });
+                    if (onToggle) onToggle(false);
+                  }}
                 >
-                  <Copy className="h-4 w-4" />
+                  Disable 2FA
                 </Button>
               </div>
             </div>

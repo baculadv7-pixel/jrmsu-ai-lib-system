@@ -29,6 +29,7 @@ const Sidebar = ({ userType }: SidebarProps) => {
     { icon: BookOpen, label: "Book Inventory", path: "/books" },
     { icon: History, label: "Borrow/Return History", path: "/history" },
     { icon: Users, label: "Student Management", path: "/students" },
+    { icon: Users, label: "Admin Management", path: "/admins" },
     { icon: BookMarked, label: "Book Management", path: "/book-management" },
     { icon: FileText, label: "Reports", path: "/reports" },
     { icon: Settings, label: "Authentication & 2FA", path: "/settings" },

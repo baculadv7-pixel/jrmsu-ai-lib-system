@@ -171,6 +171,13 @@ class DatabaseService {
       return false;
     }
   }
+
+  // Expose password verification for settings flows (disable 2FA)
+  verifyUserPassword(userId: string, password: string): boolean {
+    const user = this.getUserById(userId);
+    if (!user) return false;
+    return this.verifyPassword(password, user.passwordHash);
+  }
   
   // Migration: standardize QR structure for all users
   private migrateUsersToStandardQR(): void {
