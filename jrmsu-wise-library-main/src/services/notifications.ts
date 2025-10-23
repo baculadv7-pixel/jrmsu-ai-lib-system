@@ -1,5 +1,7 @@
+import { aiNotificationService, type AINotification } from './aiNotificationService';
+
 export type NotificationStatus = "unread" | "read";
-export type NotificationType = "borrow" | "return" | "overdue" | "system";
+export type NotificationType = "borrow" | "return" | "overdue" | "system" | "ai";
 
 export interface AppNotification {
   id: string; // NT-<timestamp>
@@ -8,6 +10,8 @@ export interface AppNotification {
   type: NotificationType;
   status: NotificationStatus;
   createdAt: string; // ISO datetime
+  priority?: "low" | "medium" | "high"; // Added for AI notifications
+  actionUrl?: string; // Added for AI notifications
 }
 
 const KEY = "jrmsu_notifications";
@@ -41,8 +45,24 @@ function broadcast() {
 export const NotificationsService = {
   list(receiverId?: string): AppNotification[] {
     const all = readAll();
-    if (!receiverId) return all.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-    return all
+    
+    // Merge AI notifications with regular notifications
+    const aiNotifs = receiverId ? aiNotificationService.getAllNotifications(receiverId) : [];
+    const mergedAI: AppNotification[] = aiNotifs.map(ai => ({
+      id: ai.id,
+      receiverId: ai.userId,
+      message: ai.message,
+      type: 'ai' as NotificationType,
+      status: ai.read ? 'read' : 'unread',
+      createdAt: ai.timestamp.toISOString(),
+      priority: ai.priority,
+      actionUrl: ai.actionUrl
+    }));
+    
+    const merged = [...all, ...mergedAI];
+    
+    if (!receiverId) return merged.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    return merged
       .filter((n) => n.receiverId === receiverId)
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   },
@@ -62,6 +82,13 @@ export const NotificationsService = {
     return item;
   },
   markRead(id: string) {
+    // Check if it's an AI notification
+    if (id.startsWith('notif_')) {
+      aiNotificationService.markAsRead(id);
+      broadcast();
+      return;
+    }
+    
     const all = readAll();
     const idx = all.findIndex((n) => n.id === id);
     if (idx !== -1) {
@@ -71,11 +98,22 @@ export const NotificationsService = {
     }
   },
   markAllRead(receiverId: string) {
+    // Mark AI notifications as read
+    aiNotificationService.markAllAsRead(receiverId);
+    
+    // Mark regular notifications as read
     const all = readAll().map((n) => (n.receiverId === receiverId ? { ...n, status: "read" } : n));
     writeAll(all);
     broadcast();
   },
   remove(id: string) {
+    // Check if it's an AI notification
+    if (id.startsWith('notif_')) {
+      aiNotificationService.deleteNotification(id);
+      broadcast();
+      return;
+    }
+    
     const all = readAll().filter((n) => n.id !== id);
     writeAll(all);
     broadcast();
@@ -91,6 +129,34 @@ export const NotificationsService = {
     return () => {
       if (ch) ch.close();
     };
+  },
+  
+  // AI Notification helpers
+  addAINotification(aiNotif: AINotification) {
+    // Save to AI service
+    aiNotificationService.saveNotification(aiNotif);
+    broadcast();
+  },
+  
+  generateBookRecommendation(userId: string, borrowHistory: any[]) {
+    aiNotificationService.generateBookRecommendation(userId, borrowHistory)
+      .then(notif => {
+        aiNotificationService.saveNotification(notif);
+        broadcast();
+      })
+      .catch(err => console.error('Failed to generate book recommendation:', err));
+  },
+  
+  generateOverdueReminder(userId: string, overdueBooks: any[]) {
+    const notif = aiNotificationService.generateOverdueReminder(userId, overdueBooks);
+    aiNotificationService.saveNotification(notif);
+    broadcast();
+  },
+  
+  generateReturnReminder(userId: string, dueBook: any) {
+    const notif = aiNotificationService.generateReturnReminder(userId, dueBook);
+    aiNotificationService.saveNotification(notif);
+    broadcast();
   },
 };
 

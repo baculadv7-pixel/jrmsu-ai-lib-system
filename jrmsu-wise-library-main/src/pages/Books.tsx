@@ -1,5 +1,5 @@
 // merged react imports below
-import { Search, Filter, Plus, LayoutList, Grid3X3, Rows3, FileText } from "lucide-react";
+import { Search, Filter, Plus, LayoutList, Grid3X3, Rows3, FileText, Sparkles, Lightbulb } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import { useAuth } from "@/context/AuthContext";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import { BooksService, type BookRecord } from "@/services/books";
 import { BorrowService } from "@/services/borrow";
 import { ReservationsService } from "@/services/reservations";
@@ -23,6 +23,7 @@ import { NotificationsService } from "@/services/notifications";
 import { useToast } from "@/hooks/use-toast";
 import QRCodeDisplay from "@/components/qr/QRCodeDisplay";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { aiSearchService, type SearchSuggestion, type SearchResult } from "@/services/aiSearchService";
 
 const Books = () => {
   const { user } = useAuth();
@@ -35,6 +36,10 @@ const Books = () => {
   const [sortOrder, setSortOrder] = useState<'asc'|'desc'>('asc');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterAvailability, setFilterAvailability] = useState<string>('all');
+  const [useAISearch, setUseAISearch] = useState(false);
+  const [aiSearchResults, setAISearchResults] = useState<SearchResult[]>([]);
+  const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const setView = (m: any) => { setViewMode(m); localStorage.setItem('books_view', m); };
 
   useEffect(() => {
@@ -42,7 +47,68 @@ const Books = () => {
     setBooks(BooksService.list());
   }, []);
 
+  // AI Search with debouncing
+  const handleAISearch = useCallback(async (query: string) => {
+    if (!query.trim() || !useAISearch) {
+      setAISearchResults([]);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const results = await aiSearchService.smartSearch(query, user?.id ?? 'guest');
+      setAISearchResults(results);
+    } catch (error) {
+      console.error('AI search failed:', error);
+      toast({ 
+        title: 'AI Search Unavailable', 
+        description: 'Using standard search instead.', 
+        variant: 'default' 
+      });
+    } finally {
+      setIsSearching(false);
+    }
+  }, [useAISearch, user?.id, toast]);
+
+  // Auto-complete suggestions
+  useEffect(() => {
+    const timer = setTimeout(async () => {
+      if (searchQuery.length >= 2 && useAISearch) {
+        const suggestions = await aiSearchService.getAutocompleteSuggestions(searchQuery);
+        setSearchSuggestions(suggestions);
+      } else {
+        setSearchSuggestions([]);
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, useAISearch]);
+
+  // Trigger AI search when query changes
+  useEffect(() => {
+    if (useAISearch) {
+      const timer = setTimeout(() => handleAISearch(searchQuery), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [searchQuery, useAISearch, handleAISearch]);
+
   const filtered = useMemo(() => {
+    // Use AI search results if enabled and available
+    if (useAISearch && aiSearchResults.length > 0) {
+      let arr = aiSearchResults.map(r => r.book);
+      
+      // Apply filters
+      const reservedIds = new Set(ReservationsService.list().map(r=>r.bookId));
+      if (filterCategory !== 'all') arr = arr.filter(b => b.category.toLowerCase() === filterCategory);
+      if (filterAvailability !== 'all') {
+        if (filterAvailability === 'available') arr = arr.filter(b => b.status === 'available');
+        if (filterAvailability === 'borrowed') arr = arr.filter(b => b.status !== 'available');
+        if (filterAvailability === 'reserved') arr = arr.filter(b => reservedIds.has(b.id));
+      }
+      
+      return arr; // Already sorted by AI relevance
+    }
+    
+    // Standard search fallback
     const q = searchQuery.toLowerCase();
     const reservedIds = new Set(ReservationsService.list().map(r=>r.bookId));
     let arr = books.filter((b) => [b.id, b.title, b.author, b.category, b.isbn ?? ""].some((t) => t.toLowerCase().includes(q)));
@@ -61,7 +127,7 @@ const Books = () => {
       return sortOrder==='asc'?res:-res;
     };
     return [...arr].sort(cmp);
-  }, [books, searchQuery, sortBy, sortOrder, filterCategory, filterAvailability]);
+  }, [books, searchQuery, sortBy, sortOrder, filterCategory, filterAvailability, useAISearch, aiSearchResults]);
 
   const reserve = (book: BookRecord) => {
     try {
@@ -136,12 +202,45 @@ const Books = () => {
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
-                      placeholder="Search books by title, author, or category..."
+                      placeholder={useAISearch ? "Ask Jose to help find books..." : "Search books by title, author, or category..."}
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
                       className="pl-10"
                     />
+                    {isSearching && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
+                      </div>
+                    )}
+                    {/* Auto-complete suggestions */}
+                    {searchSuggestions.length > 0 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-10 max-h-60 overflow-y-auto">
+                        {searchSuggestions.map((sug) => (
+                          <button
+                            key={sug.id}
+                            className="w-full px-4 py-2 text-left hover:bg-muted flex items-center justify-between"
+                            onClick={() => {
+                              setSearchQuery(sug.text);
+                              setSearchSuggestions([]);
+                            }}
+                          >
+                            <span className="text-sm">{sug.text}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {sug.type}
+                            </Badge>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
+                  <Button
+                    variant={useAISearch ? "default" : "outline"}
+                    onClick={() => setUseAISearch(!useAISearch)}
+                    title="Toggle AI-powered search"
+                  >
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    AI Search
+                  </Button>
                   <Select value={sortBy} onValueChange={(v:any)=>setSortBy(v)}>
                     <SelectTrigger className="w-36"><SelectValue placeholder="Sort"/></SelectTrigger>
                     <SelectContent>
