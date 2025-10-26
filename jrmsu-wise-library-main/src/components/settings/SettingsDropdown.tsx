@@ -148,29 +148,38 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
           <DropdownMenuSubContent className="w-96">
             {/* Change Password */}
             <DropdownMenuLabel className="text-xs text-muted-foreground">Change Password</DropdownMenuLabel>
-            <div className="px-2 pb-2 grid grid-cols-1 gap-2">
-              <Input type="password" placeholder="Current Password" id="cpw" />
-              <Input type="password" placeholder="New Password" id="npw" />
-              <Input type="password" placeholder="Confirm New Password" id="rnpw" />
-              <Button
-                size="sm"
-                onClick={() => {
-                  const cpw = (document.getElementById('cpw') as HTMLInputElement)?.value || '';
-                  const npw = (document.getElementById('npw') as HTMLInputElement)?.value || '';
-                  const rnpw = (document.getElementById('rnpw') as HTMLInputElement)?.value || '';
-                  if (npw !== rnpw || npw.length < 8) return alert('Check passwords');
-                  if (!user?.id) return;
-                  // verify then update
-const ok = databaseService.verifyUserPassword(user.id, cpw);
-                  if (!ok) return alert('Invalid current password');
-                  const hash = btoa(`jrmsu_salt_${npw}_${Date.now()}`);
-databaseService.updateUser(user.id, { passwordHash: hash });
-                  ActivityService.log(user.id, 'password_change');
-                  NotificationsService.add({ receiverId: user.id, type: 'system', message: 'Your password was changed.' });
-                  alert('Password updated');
-                }}
-              >Save</Button>
-            </div>
+              <div className="px-2 pb-2 grid grid-cols-1 gap-2">
+                <Input type="password" placeholder="Current Password" id="cpw" />
+                <Input type="password" placeholder="New Password (min 8 chars)" id="npw" />
+                <Input type="password" placeholder="Confirm New Password" id="rnpw" />
+                <Button
+                  size="sm"
+                  onClick={() => {
+                    const cpw = (document.getElementById('cpw') as HTMLInputElement)?.value || '';
+                    const npw = (document.getElementById('npw') as HTMLInputElement)?.value || '';
+                    const rnpw = (document.getElementById('rnpw') as HTMLInputElement)?.value || '';
+                    if (!user?.id) return;
+                    if (!cpw || !npw || !rnpw) return alert('Please fill all fields');
+                    if (npw !== rnpw) return alert('New passwords do not match');
+                    if (npw.length < 8) return alert('Password must be at least 8 characters');
+                    const ok = databaseService.verifyUserPassword(user.id, cpw);
+                    if (!ok) return alert('Invalid current password');
+                    const res = databaseService.setUserPassword(user.id, npw);
+                    if (!res.success) return alert(res.error || 'Failed to update password');
+                    ActivityService.log(user.id, 'password_change');
+                    NotificationsService.add({ receiverId: user.id, type: 'system', message: 'Your password was changed.' });
+                    // Sync auth session persistence
+                    try {
+                      const raw = localStorage.getItem('jrmsu_auth_session');
+                      if (raw) {
+                        const sess = JSON.parse(raw);
+                        localStorage.setItem('jrmsu_auth_session', JSON.stringify({ ...sess }));
+                      }
+                    } catch {}
+                    alert('Password updated');
+                  }}
+                >Save</Button>
+              </div>
 
             <Separator className="my-2" />
             {/* Manage Email/Mobile */}

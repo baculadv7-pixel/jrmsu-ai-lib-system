@@ -33,9 +33,9 @@ const Dashboard = () => {
         <Sidebar userType={userType} />
         
         <main className="flex-1 p-6">
-          <div className="max-w-7xl mx-auto space-y-6">
+          <div className="w-[95vw] md:w-[90vw] lg:w-[85vw] xl:w-[80vw] mx-auto space-y-6 overflow-y-auto">
             <div>
-              <h1 className="text-3xl font-bold text-primary">Dashboard</h1>
+              <h1 className="text-2xl md:text-3xl font-bold text-primary">Dashboard</h1>
               <p className="text-muted-foreground mt-1">
                 Welcome back! Here's what's happening in your library.
               </p>

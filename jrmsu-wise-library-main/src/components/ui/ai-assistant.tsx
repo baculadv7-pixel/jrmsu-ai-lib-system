@@ -266,7 +266,7 @@ export function AIAssistant({ userRole, currentPage }: AIAssistantProps) {
 
   if (!isOpen) {
     return (
-      <div className="fixed bottom-6 right-6 z-50">
+      <div className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50">
         <Button
           onClick={() => setIsOpen(true)}
           size="lg"
@@ -339,8 +339,8 @@ export function AIAssistant({ userRole, currentPage }: AIAssistantProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <div className="fixed bottom-6 right-6 z-50">
-        <Card className={`w-80 shadow-lg transition-all duration-300 ${isMinimized ? "h-14" : "h-96"}`}>
+      <div className="fixed bottom-4 right-4 md:bottom-6 md:right-6 z-50 w-[95vw] sm:w-[95vw] md:w-[60vw] lg:w-[40vw] xl:w-[30vw]">
+        <Card className={`w-full shadow-lg transition-all duration-300 ${isMinimized ? "h-14" : "h-[70vh] md:h-[60vh]"}`}>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2 cursor-pointer" 
                    onClick={() => setIsMinimized(!isMinimized)}>
           <div className="flex items-center space-x-2">
@@ -370,7 +370,7 @@ export function AIAssistant({ userRole, currentPage }: AIAssistantProps) {
         </CardHeader>
 
         {!isMinimized && (
-          <CardContent className="p-0 flex flex-col h-80">
+          <CardContent className="p-0 flex flex-col flex-1">
             <ScrollArea className="flex-1 p-4">
               <div className="space-y-4">
                 {messages.map((message) => (

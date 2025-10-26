@@ -22,6 +22,21 @@ const AIAssistant = () => {
     try { const raw = sessionStorage.getItem('ai_bubble_pos'); return raw ? JSON.parse(raw) : null; } catch { return null; }
   });
   const dragRef = useRef<{ dragging: boolean; dx: number; dy: number }>({ dragging: false, dx: 0, dy: 0 });
+  
+  // Keep bubble inside viewport on resize (DevTools device toggle included)
+  useEffect(() => {
+    const clamp = () => {
+      if (!bubblePos) return;
+      const rectSize = 64;
+      const navH = (document.querySelector('nav') as HTMLElement)?.offsetHeight ?? 64;
+      const topSafe = Math.max(8, navH + 8);
+      const x = Math.min(Math.max(bubblePos.x, 8), window.innerWidth - rectSize - 8);
+      const y = Math.min(Math.max(bubblePos.y, topSafe), window.innerHeight - rectSize - 8);
+      if (x !== bubblePos.x || y !== bubblePos.y) setBubblePos({ x, y });
+    };
+    window.addEventListener('resize', clamp, { passive: true } as any);
+    return () => window.removeEventListener('resize', clamp as any);
+  }, [bubblePos]);
   const [message, setMessage] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -260,7 +275,7 @@ const AIAssistant = () => {
   );
 
   return (
-    <div className={`fixed z-50 ${!isOpen ? 'bottom-6 right-6' : ''}`}>
+    <div className={`fixed z-[95] ${!isOpen ? 'bottom-4 right-4 md:bottom-6 md:right-6' : ''}`}>
       {!isOpen && (
         <Button
           size="lg"
@@ -283,15 +298,17 @@ const AIAssistant = () => {
           onPointerMove={(e) => {
             if (!dragRef.current.dragging) return;
             const rectSize = 64;
+            const navH = (document.querySelector('nav') as HTMLElement)?.offsetHeight ?? 64;
+            const topSafe = Math.max(8, navH + 8);
             const x = Math.min(Math.max(e.clientX - dragRef.current.dx, 8), window.innerWidth - rectSize - 8);
-            const y = Math.min(Math.max(e.clientY - dragRef.current.dy, 8), window.innerHeight - rectSize - 8);
+            const y = Math.min(Math.max(e.clientY - dragRef.current.dy, topSafe), window.innerHeight - rectSize - 8);
             setBubblePos({ x, y });
           }}
           onPointerUp={() => {
             dragRef.current.dragging = false;
             try { if (bubblePos) sessionStorage.setItem('ai_bubble_pos', JSON.stringify(bubblePos)); } catch { /* noop */ }
           }}
-          className={`fixed ${bubblePos ? '' : 'bottom-6 right-6'} h-16 w-16 rounded-full shadow-jrmsu-gold bg-gradient-to-br from-primary via-primary to-secondary hover:from-primary/90 hover:to-secondary/90 animate-pulse hover:animate-none transition-all`}
+          className={`fixed ${bubblePos ? '' : 'bottom-4 right-4 md:bottom-6 md:right-6'} z-[95] h-16 w-16 rounded-full shadow-jrmsu-gold bg-gradient-to-br from-primary via-primary to-secondary hover:from-primary/90 hover:to-secondary/90 animate-pulse hover:animate-none transition-all`}
           style={bubblePos ? ({ left: bubblePos.x, top: bubblePos.y } as React.CSSProperties) : undefined}
           title="Expand Jose (overlay) — Ask anything..."
         >
@@ -303,15 +320,15 @@ const AIAssistant = () => {
 
       {isOpen && (
         isFullscreen ? (
-          <div className="fixed inset-0 z-[70] bg-black/30 backdrop-blur-sm flex items-center justify-center transition-opacity">
+          <div className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-sm flex items-center justify-center transition-opacity">
             <Card className="w-[min(960px,95vw)] h-[90vh] rounded-xl shadow-jrmsu flex flex-col overflow-hidden transition-all duration-200 ease-out">
               {Header}
               <div className="flex-1 flex flex-col">{Body}</div>
             </Card>
           </div>
         ) : (
-          <div className="fixed bottom-24 right-6 z-[70]">
-            <Card className="w-[380px] max-w-[90vw] h-[520px] max-h-[80vh] rounded-xl shadow-jrmsu flex flex-col overflow-hidden transition-all duration-200 ease-out">
+          <div className="fixed bottom-20 right-4 md:bottom-24 md:right-6 z-[90]">
+            <Card className="w-[95vw] sm:w-[95vw] md:w-[60vw] lg:w-[40vw] xl:w-[35vw] h-[85vh] md:h-[70vh] rounded-xl shadow-jrmsu flex flex-col overflow-hidden transition-all duration-200 ease-out">
               {Header}
               <div className="flex-1 flex flex-col">{Body}</div>
             </Card>

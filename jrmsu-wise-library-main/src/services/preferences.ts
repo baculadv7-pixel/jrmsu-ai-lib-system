@@ -3,6 +3,18 @@ export type UIState = {
   aiView?: 'compact' | 'windowed' | 'fullscreen';
   lastPage?: string;
   notificationsOpen?: boolean;
+  // Books page preferences
+  booksView?: 'list' | 'grid' | 'compact' | 'detailed';
+  booksSortBy?: 'title' | 'author' | 'category' | 'isbn' | 'shelf';
+  booksSortOrder?: 'asc' | 'desc';
+  booksFilterCategory?: string;
+  booksFilterAvailability?: string;
+  booksUseAISearch?: boolean;
+  // Book management preferences (admin)
+  bmSortBy?: 'title' | 'author' | 'category' | 'date';
+  bmSortOrder?: 'asc' | 'desc';
+  bmFilterCategory?: string;
+  bmFilterAvailability?: string;
 };
 
 const PREFIX = 'jrmsu_prefs_';

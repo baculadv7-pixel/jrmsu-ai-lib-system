@@ -31,7 +31,7 @@ const Books = () => {
   const userType: "student" | "admin" = user?.role ?? "student";
   const [searchQuery, setSearchQuery] = useState("");
   const [books, setBooks] = useState<BookRecord[]>([]);
-  const [viewMode, setViewMode] = useState<'list'|'grid'|'compact'|'detailed'>(() => (localStorage.getItem('books_view') as any) || 'list');
+  const [viewMode, setViewMode] = useState<'list'|'grid'|'compact'|'detailed'>('list');
   const [sortBy, setSortBy] = useState<'title'|'author'|'category'|'isbn'|'shelf'>('title');
   const [sortOrder, setSortOrder] = useState<'asc'|'desc'>('asc');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -40,12 +40,44 @@ const Books = () => {
   const [aiSearchResults, setAISearchResults] = useState<SearchResult[]>([]);
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const setView = (m: any) => { setViewMode(m); localStorage.setItem('books_view', m); };
+  const setView = (m: any) => { setViewMode(m); };
 
   useEffect(() => {
     BooksService.ensureSeed();
     setBooks(BooksService.list());
   }, []);
+
+  // Hydrate preferences
+  useEffect(() => {
+    const uid = user?.id ?? 'guest';
+    try {
+      const { PreferenceService } = require("@/services/preferences");
+      const p = PreferenceService.load(uid);
+      if (p.booksView) setViewMode(p.booksView as any);
+      if (p.booksSortBy) setSortBy(p.booksSortBy as any);
+      if (p.booksSortOrder) setSortOrder(p.booksSortOrder as any);
+      if (p.booksFilterCategory) setFilterCategory(p.booksFilterCategory);
+      if (p.booksFilterAvailability) setFilterAvailability(p.booksFilterAvailability);
+      if (typeof p.booksUseAISearch === 'boolean') setUseAISearch(p.booksUseAISearch);
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  // Persist preferences
+  useEffect(() => {
+    const uid = user?.id ?? 'guest';
+    try {
+      const { PreferenceService } = require("@/services/preferences");
+      PreferenceService.save(uid, {
+        booksView: viewMode,
+        booksSortBy: sortBy,
+        booksSortOrder: sortOrder,
+        booksFilterCategory: filterCategory,
+        booksFilterAvailability: filterAvailability,
+        booksUseAISearch: useAISearch,
+      });
+    } catch {}
+  }, [user?.id, viewMode, sortBy, sortOrder, filterCategory, filterAvailability, useAISearch]);
 
   // AI Search with debouncing
   const handleAISearch = useCallback(async (query: string) => {
@@ -160,10 +192,10 @@ const Books = () => {
         <Sidebar userType={userType} />
         
         <main className="flex-1 p-6">
-          <div className="max-w-7xl mx-auto space-y-6">
+          <div className="w-[95vw] md:w-[90vw] lg:w-[85vw] xl:w-[80vw] mx-auto space-y-6 overflow-y-auto">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
-                <h1 className="text-3xl font-bold text-primary">Book Inventory</h1>
+                <h1 className="text-2xl md:text-3xl font-bold text-primary">Book Inventory</h1>
                 <p className="text-muted-foreground mt-1">
                   Browse and manage the library collection
                 </p>
@@ -279,7 +311,7 @@ const Books = () => {
               </CardHeader>
               <CardContent>
                 {viewMode==='list' && (
-                <div className="overflow-x-auto">
+                <div className="overflow-x-auto max-w-full">
                 <Table>
                   <TableHeader>
                     <TableRow>

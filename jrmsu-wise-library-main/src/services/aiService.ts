@@ -34,8 +34,15 @@ export interface AdminCommand {
   description: string;
 }
 
-const OLLAMA_BASE_URL = 'http://localhost:11434';
-const BACKEND_AI_BASE = (import.meta as any).env?.VITE_AI_API_BASE as string | undefined;
+import { API } from "@/config/api";
+const OLLAMA_BASE_URL = API.AI.BASE;
+const BACKEND_AI_BASE = ((): string | undefined => {
+  // Consider backend proxy if base is not pointing to 11434
+  try {
+    const url = new URL(API.AI.BASE);
+    return url.port && url.port !== '11434' ? API.AI.BASE : (API as any).AI_PROXY_BASE_UNSET;
+  } catch { return undefined; }
+})();
 const MODEL_NAME = 'llama3:8b-instruct-q4_K_M';
 const CHAT_HISTORY_KEY = 'jrmsu_ai_chat_history';
 const CHAT_SESSIONS_KEY = 'jrmsu_ai_chat_sessions';
@@ -74,10 +81,10 @@ class AIService {
   async checkOllamaStatus(): Promise<boolean> {
     try {
       if (BACKEND_AI_BASE) {
-        const response = await fetch(`${BACKEND_AI_BASE}/health`);
+        const response = await fetch(`${API.AI.BASE}${API.AI.HEALTH_PATH}`);
         return response.ok;
       }
-      const response = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
+      const response = await fetch(`${API.AI.BASE}${API.AI.HEALTH_PATH}`);
       return response.ok;
     } catch (error) {
       console.error('AI status check failed:', error);
@@ -112,7 +119,7 @@ class AIService {
       const response = await (async () => {
         if (BACKEND_AI_BASE) {
           const token = localStorage.getItem('auth_token') || '';
-          return fetch(`${BACKEND_AI_BASE}/chat`, {
+          return fetch(`${API.AI.BASE}${(API.AI as any).CHAT_PROXY_PATH || '/ai/chat'}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -124,7 +131,7 @@ class AIService {
             })
           });
         }
-        return fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+        return fetch(`${API.AI.BASE}${API.AI.CHAT_PATH}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -192,7 +199,7 @@ class AIService {
         if (BACKEND_AI_BASE) {
           await this.ensureAuthToken(userId, 'user');
           const token = localStorage.getItem('auth_token') || '';
-          return fetch(`${BACKEND_AI_BASE}/chat`, {
+          return fetch(`${API.AI.BASE}${(API.AI as any).CHAT_PROXY_PATH || '/ai/chat'}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -204,7 +211,7 @@ class AIService {
             })
           });
         }
-        return fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+        return fetch(`${API.AI.BASE}${API.AI.CHAT_PATH}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

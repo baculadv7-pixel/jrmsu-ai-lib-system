@@ -11,53 +11,51 @@ export type QRGenerateResult = {
 };
 
 export async function generateUserQR(params: GenerateUserQRParams): Promise<QRGenerateResult> {
+  const isLocal = typeof window !== 'undefined' && (import.meta.env?.DEV || window.location.hostname === 'localhost');
+  if (isLocal) {
+    return localUserEnvelope(params);
+  }
   try {
     const { data, error } = await supabase.functions.invoke("qr-generate-user", { body: params });
     if (error) throw error;
     return data as QRGenerateResult;
   } catch {
-    // Generate scanner-compatible QR code structure
-    // For development, we'll generate a compatible structure since Supabase functions aren't available
-    
-    // Fetch actual user data from database
-    const user = databaseService.getUserById(params.userId);
-    if (!user) {
-      throw new Error(`User not found: ${params.userId}`);
-    }
-    
-    const userType = user.userType;
-    const fullName = user.fullName;
-    
-    // Generate minimal essential data for optimal QR readability with logo space
-    const timestamp = Date.now();
-    const sessionToken = btoa(`${params.userId}-${timestamp}`);
-    
-    // EXACT QR structure matching database and validator expectations
-    const qrData = {
-      // CORE REQUIRED FIELDS - matches database authenticateWithQRCode expectations
-      fullName: fullName,
-      userId: params.userId,
-      userType: userType,
-      systemId: "JRMSU-LIBRARY",
-      systemTag: userType === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
-      timestamp: timestamp,
-      sessionToken: sessionToken,
-      role: userType === 'admin' ? 'Administrator' : 'Student',
-      
-      // RESTORE 2FA SETUP KEY - for Google Authenticator compatibility
-      ...(user.twoFactorKey ? {
-        twoFactorKey: user.twoFactorKey,
-        twoFactorSetupKey: user.twoFactorKey  // Legacy field name
-      } : {})
-    };
-    
-    const envelope = JSON.stringify(qrData);
-    
-    return { envelope };
+    return localUserEnvelope(params);
   }
 }
 
+function localUserEnvelope(params: GenerateUserQRParams): QRGenerateResult {
+  // Fetch actual user data from database
+  const user = databaseService.getUserById(params.userId);
+  if (!user) {
+    throw new Error(`User not found: ${params.userId}`);
+  }
+  const userType = user.userType;
+  const fullName = user.fullName;
+  // Minimal essential data for optimal QR readability
+  const timestamp = Date.now();
+  const sessionToken = btoa(`${params.userId}-${timestamp}`);
+  const qrData = {
+    fullName: fullName,
+    userId: params.userId,
+    userType: userType,
+    systemId: "JRMSU-LIBRARY",
+    systemTag: userType === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
+    timestamp: timestamp,
+    sessionToken: sessionToken,
+    role: userType === 'admin' ? 'Administrator' : 'Student',
+    ...(user.twoFactorKey ? { twoFactorKey: user.twoFactorKey, twoFactorSetupKey: user.twoFactorKey } : {})
+  };
+  const envelope = JSON.stringify(qrData);
+  return { envelope };
+}
+
 export async function generateBookQR(params: GenerateBookQRParams): Promise<QRGenerateResult> {
+  const isLocal = typeof window !== 'undefined' && (import.meta.env?.DEV || window.location.hostname === 'localhost');
+  if (isLocal) {
+    const envelope = JSON.stringify({ v: 1, typ: "book", bid: params.bookId, ts: Date.now() });
+    return { envelope };
+  }
   try {
     const { data, error } = await supabase.functions.invoke("qr-generate-book", { body: params });
     if (error) throw error;
@@ -70,6 +68,8 @@ export async function generateBookQR(params: GenerateBookQRParams): Promise<QRGe
 
 export async function verifyEnvelope(_envelope: string): Promise<{ ok: boolean }>
 {
+  const isLocal = typeof window !== 'undefined' && (import.meta.env?.DEV || window.location.hostname === 'localhost');
+  if (isLocal) return { ok: true };
   try {
     const { data, error } = await supabase.functions.invoke("qr-verify", { body: { envelope: _envelope } });
     if (error) throw error;

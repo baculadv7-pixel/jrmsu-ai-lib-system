@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { X, Upload, Download, RotateCcw, Save, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -34,14 +34,7 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [isGeneratingQR, setIsGeneratingQR] = useState(false);
 
-  // Generate QR code on modal open
-  useEffect(() => {
-    if (isOpen && admin) {
-      generateQRCode();
-    }
-  }, [isOpen, admin, generateQRCode]);
-
-  const generateQRCode = React.useCallback(async () => {
+const generateQRCode = useCallback(async () => {
     try {
       setIsGeneratingQR(true);
       
@@ -77,7 +70,14 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
     } finally {
       setIsGeneratingQR(false);
     }
-  }, [formData, toast]);
+}, [formData, toast]);
+
+// Generate QR code on modal open (after callback is defined)
+useEffect(() => {
+  if (isOpen && admin) {
+    generateQRCode();
+  }
+}, [isOpen, admin, generateQRCode]);
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { QRCodeLogin } from "@/components/auth/QRCodeLogin";
 import { WelcomeMessage, useWelcomeMessage } from "@/components/auth/WelcomeMessage";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ForgotPasswordOverlayBody } from "@/components/auth/ForgotPasswordOverlay";
 
 const Login = () => {
   const navigate = useNavigate();
@@ -35,6 +36,7 @@ const Login = () => {
   const is2FAEnabled = Boolean(session?.twoFactorEnabled);
   const [twoFARequired, setTwoFARequired] = useState(false);
   const [twoFACode, setTwoFACode] = useState("");
+  const [forgotOpen, setForgotOpen] = useState(false);
 
   const adminIdRegex = /^KCL-\d{5}$/;
   const studentIdRegex = /^KC-\d{2}-[A-D]-\d{5}$/; // enforce exactly 5 digits at the end
@@ -210,9 +212,9 @@ const Login = () => {
               {/* Removed inline TOTP input to avoid duplicate 2FA UI; 2FA handled via dialog after login */}
 
               <div className="flex items-center justify-between text-sm">
-                <a href="#" className="text-primary hover:underline">
+                <button type="button" onClick={() => setForgotOpen(true)} className="text-primary hover:underline">
                   Forgot Password?
-                </a>
+                </button>
               </div>
 
               <Button type="submit" className="w-full">
@@ -234,6 +236,17 @@ const Login = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Forgot Password Overlay */}
+      <Dialog open={forgotOpen} onOpenChange={setForgotOpen}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Forgot Password</DialogTitle>
+            <DialogDescription>Reset your password using email verification, admin request, or 2FA.</DialogDescription>
+          </DialogHeader>
+          <ForgotPasswordOverlayBody initialId={formData.id} onDone={() => setForgotOpen(false)} />
+        </DialogContent>
+      </Dialog>
 
       {/* 2FA Authentication Code Request Card */}
       <Dialog open={twoFARequired} onOpenChange={setTwoFARequired}>

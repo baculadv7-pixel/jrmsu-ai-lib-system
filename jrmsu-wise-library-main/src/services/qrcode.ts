@@ -146,7 +146,8 @@ class QRCodeService {
   } {
     return {
       encryptedPasswordToken: this.generateRandomString(32),
-      twoFactorSetupKey: this.generateRandomString(16)
+      twoFactorSetupKey: this.generateRandomString(16),
+      realTimeAuthCode: this.generateRandomString(6, true),
     };
   }
 

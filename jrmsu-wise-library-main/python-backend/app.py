@@ -88,6 +88,70 @@ def twofa_verify():
     ok = verify_totp_code(secret, token, window=window)
     return jsonify(valid=ok)
 
+# ---- Forgot Password API ----
+RESET_CODES = {}
+
+@app.route('/auth/request-reset', methods=['POST'])
+@limiter.limit("30 per minute")
+def auth_request_reset():
+    body = request.get_json(force=True)
+    method = (body.get('method') or 'email').lower()
+    user_id = (body.get('userId') or '').strip()
+    email = (body.get('email') or '').strip().lower()
+    full_name = (body.get('fullName') or '').strip()
+    if not email:
+        return jsonify(error='Email required'), 400
+    if method == 'email':
+        # generate code
+        code = f"{int(time.time())%1000000:06d}"
+        expires_at = int(time.time()) + 300  # 5 minutes
+        RESET_CODES[email] = { 'code': code, 'expires_at': expires_at, 'user_id': user_id, 'full_name': full_name }
+        # TODO: send email via SMTP configured env; for now just log to server
+        print(f"[MAIL] Reset code for {email}: {code} (expires in 5m)")
+        return jsonify(ok=True)
+    elif method == 'admin':
+        # Admin request acknowledged; delivery to admins is handled by app layer notifications
+        return jsonify(ok=True)
+    else:
+        return jsonify(error='Invalid method'), 400
+
+@app.route('/auth/verify-code', methods=['POST'])
+@limiter.limit("60 per minute")
+def auth_verify_code():
+    body = request.get_json(force=True)
+    email = (body.get('email') or '').strip().lower()
+    code = (body.get('code') or '').strip()
+    rec = RESET_CODES.get(email)
+    if not rec:
+        return jsonify(error='No code pending'), 400
+    if int(time.time()) > int(rec.get('expires_at', 0)):
+        return jsonify(error='Expired code'), 400
+    if code != str(rec.get('code')):
+        return jsonify(error='Invalid code'), 400
+    return jsonify(ok=True)
+
+@app.route('/auth/reset-password', methods=['POST'])
+@limiter.limit("30 per minute")
+def auth_reset_password():
+    body = request.get_json(force=True)
+    email = (body.get('email') or '').strip().lower()
+    code = (body.get('code') or '').strip()
+    new_password = (body.get('newPassword') or '').strip()
+    if len(new_password) < 8:
+        return jsonify(error='Password too short'), 400
+    rec = RESET_CODES.get(email)
+    if not rec:
+        return jsonify(error='No code pending'), 400
+    if int(time.time()) > int(rec.get('expires_at', 0)):
+        return jsonify(error='Expired code'), 400
+    if code != str(rec.get('code')):
+        return jsonify(error='Invalid code'), 400
+    # At this backend layer, we only confirm the reset; the frontend updates its local DB/session.
+    # In a real deployment, update the actual user record here (e.g., Supabase/SQL) with bcrypt.
+    # Clear the code after use
+    del RESET_CODES[email]
+    return jsonify(ok=True)
+
 @app.route('/qr/validate', methods=['POST'])
 def qr_validate():
     body = request.get_json(force=True)

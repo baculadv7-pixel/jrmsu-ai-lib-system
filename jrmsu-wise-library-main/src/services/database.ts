@@ -25,9 +25,11 @@ export interface User {
   age?: string;
   
   // Authentication
-  passwordHash: string; // Encrypted password
+  passwordHash: string; // Stored password hash (legacy or v2 format)
+  passwordAlgo?: 'legacy' | 'v2';
+  passwordSalt?: string; // v2 only
   twoFactorEnabled: boolean;
-  twoFactorKey?: string; // Google Authenticator key
+  twoFactorKey?: string; // Google Authenticator key;
   
   // QR Code data
   qrCodeData?: string; // Generated QR code JSON
@@ -166,13 +168,22 @@ class DatabaseService {
   
   // Simple password hashing (use proper encryption in production)
   private hashPassword(password: string): string {
-    // Simple base64 encoding for demo - use bcrypt or similar in production
+    // Legacy (v1) hash retained for backward-compatibility with seeded users
     return btoa(`jrmsu_salt_${password}_${Date.now()}`);
   }
   
   private verifyPassword(password: string, hash: string): boolean {
-    // Simple verification for demo
+    // Support v2 format: "v2:<salt>:<payload>" where payload=btoa(`${salt}|${password}`)
     try {
+      if (hash.startsWith('v2:')) {
+        const parts = hash.split(':');
+        if (parts.length !== 3) return false;
+        const salt = parts[1];
+        const payload = parts[2];
+        const expected = btoa(`${salt}|${password}`);
+        return payload === expected;
+      }
+      // Legacy (v1) verification
       const decoded = atob(hash);
       return decoded.includes(password);
     } catch {
@@ -180,11 +191,23 @@ class DatabaseService {
     }
   }
 
-  // Expose password verification for settings flows (disable 2FA)
+  // Expose password verification for settings flows (disable 2FA / change password)
   verifyUserPassword(userId: string, password: string): boolean {
     const user = this.getUserById(userId);
     if (!user) return false;
     return this.verifyPassword(password, user.passwordHash);
+  }
+
+  // Secure-ish v2 setter (demo): random salt + base64(salt|password)
+  setUserPassword(userId: string, newPassword: string): { success: boolean; error?: string } {
+    const users = this.getAllUsers();
+    const idx = users.findIndex(u => u.id === userId);
+    if (idx === -1) return { success: false, error: 'User not found' };
+    const salt = Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const payload = btoa(`${salt}|${newPassword}`);
+    users[idx] = { ...users[idx], passwordHash: `v2:${salt}:${payload}`, passwordAlgo: 'v2', passwordSalt: salt, updatedAt: new Date() } as any;
+    this.saveUsers(users);
+    return { success: true };
   }
   
   // Migration: standardize QR structure for all users

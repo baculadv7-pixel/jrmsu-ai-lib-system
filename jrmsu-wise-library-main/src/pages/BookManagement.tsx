@@ -48,6 +48,7 @@ const BookManagement = () => {
     BooksService.ensureSeed();
     loadData();
   }, []);
+
   
   const loadData = () => {
     setBooks(BooksService.list());
@@ -58,6 +59,35 @@ const BookManagement = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterAvailability, setFilterAvailability] = useState<string>('all');
+
+  // Hydrate admin preferences (run after state creation)
+  useEffect(() => {
+    const uid = user?.id ?? 'ADMIN';
+    try {
+      const { PreferenceService } = require("@/services/preferences");
+      const p = PreferenceService.load(uid);
+      if (p.bmSortBy) setSortBy(p.bmSortBy as any);
+      if (p.bmSortOrder) setSortOrder(p.bmSortOrder as any);
+      if (p.bmFilterCategory) setFilterCategory(p.bmFilterCategory);
+      if (p.bmFilterAvailability) setFilterAvailability(p.bmFilterAvailability);
+    } catch {}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  // Persist admin preferences
+  useEffect(() => {
+    const uid = user?.id ?? 'ADMIN';
+    try {
+      const { PreferenceService } = require("@/services/preferences");
+      PreferenceService.save(uid, {
+        bmSortBy: sortBy,
+        bmSortOrder: sortOrder,
+        bmFilterCategory: filterCategory,
+        bmFilterAvailability: filterAvailability,
+      });
+    } catch {}
+  }, [user?.id, sortBy, sortOrder, filterCategory, filterAvailability]);
+
   const filtered = useMemo(() => {
     const q = searchTerm.toLowerCase();
     let arr = books.filter((b) =>
@@ -162,10 +192,10 @@ const BookManagement = () => {
         <Sidebar userType={userType} />
         
         <main className="flex-1 p-6">
-          <div className="max-w-7xl mx-auto space-y-6">
-            <div className="flex items-center justify-between">
+          <div className="w-[95vw] md:w-[90vw] lg:w-[85vw] xl:w-[80vw] mx-auto space-y-6 overflow-y-auto">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h1 className="text-3xl font-bold text-primary">Book Management</h1>
+                <h1 className="text-2xl md:text-3xl font-bold text-primary">Book Management</h1>
                 <p className="text-muted-foreground mt-1">
                   Add, edit, and manage library inventory
                 </p>
@@ -382,8 +412,8 @@ const BookManagement = () => {
                 </Dialog>
               </CardHeader>
               <CardContent className="p-0">
-                <div className="overflow-auto max-h-[600px] border rounded-lg">
-                  <table className="w-full border-collapse">
+                <div className="overflow-x-auto overflow-y-auto max-h-[60vh] border rounded-lg">
+                  <table className="w-full border-collapse min-w-[800px]">
                     <thead className="bg-muted/50 sticky top-0 z-10">
                       <tr className="border-b">
                         <th className="text-left p-3 font-medium whitespace-nowrap min-w-[120px]">Book Code</th>
