@@ -45,84 +45,8 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
 
-  // Handle detected QR code with enhanced error handling
-  const handleQRDetected = useCallback(async (qrData: string) => {
-    console.log('🎯 QR Code raw data detected:', qrData.slice(0, 100) + '...');
-    
-    try {
-      // Try to parse the QR data first
-      let parsedData;
-      try {
-        parsedData = JSON.parse(qrData);
-        console.log('📋 QR Code parsed successfully:', {
-          userId: parsedData.userId,
-          userType: parsedData.userType,
-          systemId: parsedData.systemId,
-          systemTag: parsedData.systemTag,
-          hasSessionToken: !!parsedData.sessionToken,
-          fullName: parsedData.fullName?.slice(0, 20) + '...' || 'N/A'
-        });
-      } catch (parseError) {
-        console.error('❌ QR Code parsing failed:', parseError);
-        setScanError("Invalid QR Code format");
-        return;
-      }
-      
-      const validation = validateJRMSUQRCode(qrData);
-      console.log('🔍 QR Code validation result:', {
-        isValid: validation.isValid,
-        error: validation.error,
-        hasData: !!validation.data
-      });
-      
-      if (!validation.isValid) {
-        console.warn('⚠️ QR Code validation failed:', validation.error);
-        setScanError(validation.error || "Invalid QR Code");
-        toast({
-          title: "⚠️ Invalid QR Code",
-          description: validation.error || "Please scan a valid JRMSU Library System QR Code.",
-          variant: "destructive"
-        });
-        
-        // Auto-clear error after 3 seconds to continue scanning
-        setTimeout(() => {
-          setScanError(null);
-        }, 3000);
-        return;
-      }
-      
-      const loginData = validation.data as QRLoginData;
-      setScannedData(loginData);
-      setScanError(null);
-      
-      console.log('✅ Valid QR code processed - FORCING AUTO-LOGIN:', {
-        userId: loginData.userId,
-        userType: loginData.userType,
-        fullName: loginData.fullName,
-        systemTag: loginData.systemTag,
-        hasSessionToken: !!loginData.sessionToken,
-        has2FA: !!loginData.twoFactorKey
-      });
-      
-      // 🚀 FORCE AUTO-LOGIN - Skip all validation and proceed immediately
-      console.log('🚀 FORCING immediate auto-login without any delays or validations');
-      
-      // Force immediate auto-login
-      await proceedWithAutoLogin(loginData);
-      
-    } catch (error) {
-      console.error('Error processing QR code:', error);
-      setScanError("Failed to process QR code");
-      toast({
-        title: "Processing Error",
-        description: "Failed to process the QR code. Please try scanning again.",
-        variant: "destructive"
-      });
-    }
-  }, [toast]);
-
-  // FORCE AUTO-LOGIN with comprehensive debugging
-  const proceedWithAutoLogin = async (loginData: QRLoginData) => {
+  // FORCE AUTO-LOGIN with comprehensive debugging (defined before handlers to avoid TDZ)
+  const proceedWithAutoLogin = useCallback(async (loginData: QRLoginData) => {
     console.log('🚀 ========= FORCING QR AUTO-LOGIN ========');
     console.log('📋 QR Login Data received:', JSON.stringify(loginData, null, 2));
     
@@ -207,8 +131,84 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps
       setIsLoggingIn(false);
       console.log('🔄 Auto-login process completed (success or failure)');
     }
-  };
-  
+  }, [signInWithQR, showWelcome, toast, verifyTotp]);
+
+  // Handle detected QR code with enhanced error handling
+  const handleQRDetected = useCallback(async (qrData: string) => {
+    console.log('🎯 QR Code raw data detected:', qrData.slice(0, 100) + '...');
+    
+    try {
+      // Try to parse the QR data first
+      let parsedData;
+      try {
+        parsedData = JSON.parse(qrData);
+        console.log('📋 QR Code parsed successfully:', {
+          userId: parsedData.userId,
+          userType: parsedData.userType,
+          systemId: parsedData.systemId,
+          systemTag: parsedData.systemTag,
+          hasSessionToken: !!parsedData.sessionToken,
+          fullName: parsedData.fullName?.slice(0, 20) + '...' || 'N/A'
+        });
+      } catch (parseError) {
+        console.error('❌ QR Code parsing failed:', parseError);
+        setScanError("Invalid QR Code format");
+        return;
+      }
+      
+      const validation = validateJRMSUQRCode(qrData);
+      console.log('🔍 QR Code validation result:', {
+        isValid: validation.isValid,
+        error: validation.error,
+        hasData: !!validation.data
+      });
+      
+      if (!validation.isValid) {
+        console.warn('⚠️ QR Code validation failed:', validation.error);
+        setScanError(validation.error || "Invalid QR Code");
+        toast({
+          title: "⚠️ Invalid QR Code",
+          description: validation.error || "Please scan a valid JRMSU Library System QR Code.",
+          variant: "destructive"
+        });
+        
+        // Auto-clear error after 3 seconds to continue scanning
+        setTimeout(() => {
+          setScanError(null);
+        }, 3000);
+        return;
+      }
+      
+      const loginData = validation.data as QRLoginData;
+      setScannedData(loginData);
+      setScanError(null);
+      
+      console.log('✅ Valid QR code processed - FORCING AUTO-LOGIN:', {
+        userId: loginData.userId,
+        userType: loginData.userType,
+        fullName: loginData.fullName,
+        systemTag: loginData.systemTag,
+        hasSessionToken: !!loginData.sessionToken,
+        has2FA: !!loginData.twoFactorKey
+      });
+      
+      // 🚀 FORCE AUTO-LOGIN - Skip all validation and proceed immediately
+      console.log('🚀 FORCING immediate auto-login without any delays or validations');
+      
+      // Force immediate auto-login
+      await proceedWithAutoLogin(loginData);
+      
+    } catch (error) {
+      console.error('Error processing QR code:', error);
+      setScanError("Failed to process QR code");
+      toast({
+        title: "Processing Error",
+        description: "Failed to process the QR code. Please try scanning again.",
+        variant: "destructive"
+      });
+    }
+  }, [toast, proceedWithAutoLogin]);
+
   // Proceed with 2FA login using QR data
   const proceedWithLogin = async (loginData: QRLoginData, totpCode: string) => {
     setIsLoggingIn(true);

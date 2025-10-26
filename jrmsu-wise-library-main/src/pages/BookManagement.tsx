@@ -21,7 +21,9 @@ const BookManagement = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [books, setBooks] = useState<BookRecord[]>([]);
   const [customColumns, setCustomColumns] = useState<CustomColumn[]>([]);
-  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const location = window.location;
+  const params = new URLSearchParams(location.search);
+  const [isCreateOpen, setIsCreateOpen] = useState(params.get('new') === '1');
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isAddColumnOpen, setIsAddColumnOpen] = useState(false);
   const [editingBook, setEditingBook] = useState<BookRecord | null>(null);

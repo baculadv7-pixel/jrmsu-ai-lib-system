@@ -30,12 +30,7 @@ const RegistrationInstitution = lazy(() => import("./pages/RegistrationInstituti
 const RegistrationSecurity = lazy(() => import("./pages/RegistrationSecurity"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
-// Import QR test utilities only in development (excluded from prod bundle)
-if (import.meta.env.DEV) {
-  import("./utils/qr-test");
-  import("./utils/qr-e2e-test");
-  import("./utils/qr-scannability-test");
-}
+// Dev-only test utilities removed to avoid shipping demo/test files
 
 const queryClient = new QueryClient();
 

@@ -1,6 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, useCallback } from "react";
 import { verifyTotpToken } from "@/utils/totp";
 import { databaseService, User } from "@/services/database";
+import { ActivityService } from "@/services/activity";
+import { NotificationsService } from "@/services/notifications";
+import type { QRLoginData } from "@/services/qr";
 
 export type UserRole = "student" | "admin";
 
@@ -13,11 +16,13 @@ interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
   signIn: (params: { id: string; password: string; role: UserRole }) => Promise<void>;
-  signInWithQR: (qrData: any) => Promise<void>;
+  signInWithQR: (qrData: QRLoginData) => Promise<void>;
   signOut: () => void;
   enableTwoFactor: (authKey: string) => void;
   disableTwoFactor: () => void;
   verifyTotp: (token: string) => boolean;
+  refreshSession: () => void;
+  updateUser: (partial: Partial<AuthUser>) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -27,17 +32,48 @@ const AUTH_STORAGE_KEY = "jrmsu_auth_session";
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
 
+  // Define signOut before effects to avoid temporal dead zone in dependencies
+  const signOut = useCallback(() => {
+    try { if (user?.id) ActivityService.log(user.id, 'logout'); } catch { /* noop */ }
+    localStorage.removeItem('token');
+    localStorage.removeItem(AUTH_STORAGE_KEY);
+    setUser(null);
+  }, [user?.id]);
+
   useEffect(() => {
-    const raw = localStorage.getItem(AUTH_STORAGE_KEY);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as AuthUser;
+    // Persist session across refresh: if AUTH storage missing but token exists, hydrate from token
+    try {
+      const rawSession = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (rawSession) {
+        const parsed = JSON.parse(rawSession) as AuthUser;
         setUser(parsed);
-      } catch {
-        localStorage.removeItem(AUTH_STORAGE_KEY);
+      } else {
+        const token = localStorage.getItem('token');
+        if (token && token.startsWith('jwt.')) {
+          const payload = token.split('.')[1];
+          try {
+            const decoded = atob(payload);
+            const userId = decoded.split('.')[0];
+            if (userId) {
+              const dbUser = databaseService.getUserById(userId as string);
+              if (dbUser) {
+                const session: AuthUser = { ...dbUser, role: dbUser.userType as UserRole, authKey: dbUser.twoFactorKey };
+                localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
+                setUser(session);
+              }
+            }
+          } catch { /* noop */ }
+        }
       }
-    }
-  }, []);
+    } catch { /* noop */ }
+
+    // Inactivity auto-logout: 30 minutes
+    let timer: any = null;
+    const reset = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => signOut(), 30 * 60 * 1000); };
+    ['click','mousemove','keydown','scroll','touchstart'].forEach(ev => window.addEventListener(ev, reset, { passive: true } as any));
+    reset();
+    return () => { if (timer) clearTimeout(timer); ['click','mousemove','keydown','scroll','touchstart'].forEach(ev => window.removeEventListener(ev, reset as any)); };
+  }, [signOut]);
 
   const signIn = async ({ id, password, role }: { id: string; password: string; role: UserRole }) => {
     if (!id || !password) {
@@ -73,13 +109,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       authKey: dbUser.twoFactorKey
     };
     
+    // Generate simple JWT-like token (placeholder; replace with real backend JWT)
+    const token = `jwt.${btoa(`${dbUser.id}.${Date.now()}`)}`;
+    localStorage.setItem('token', token);
+
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
     setUser(session);
-    
+
+    try { ActivityService.log(dbUser.id, 'login'); } catch { /* noop */ }
     console.log(`✅ User authenticated via manual login: ${dbUser.fullName} (${dbUser.id})`);
   };
 
-  const signInWithQR = async (qrData: any) => {
+  const signInWithQR = async (qrData: QRLoginData) => {
     console.log('🆔 AuthContext - Processing QR login:', {
       userId: qrData.userId,
       userType: qrData.userType,
@@ -135,16 +176,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
     
     console.log('💾 AuthContext - Saving session to localStorage...');
+    const token = `jwt.${btoa(`${dbUser.id}.${Date.now()}`)}`;
+    localStorage.setItem('token', token);
+
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
     setUser(session);
-    
+
+    try { ActivityService.log(dbUser.id, 'login', 'QR'); } catch { /* noop */ }
     console.log(`✅ User authenticated successfully via QR login: ${dbUser.fullName} (${dbUser.id})`);
   };
 
-  const signOut = () => {
-    localStorage.removeItem(AUTH_STORAGE_KEY);
-    setUser(null);
-  };
 
   const enableTwoFactor = (authKey: string) => {
     if (!user) return;
@@ -155,6 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updated: AuthUser = { ...persisted, role: (persisted.userType as UserRole), authKey: persisted.twoFactorKey };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
     setUser(updated);
+    try { ActivityService.log(user.id, '2fa_enable'); NotificationsService.add({ receiverId: user.id, type: 'system', message: 'Two-factor authentication enabled.' }); } catch {}
   };
 
   const disableTwoFactor = () => {
@@ -165,6 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const updated: AuthUser = { ...persisted, role: (persisted.userType as UserRole), authKey: undefined };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
     setUser(updated);
+    try { ActivityService.log(user.id, '2fa_disable'); NotificationsService.add({ receiverId: user.id, type: 'system', message: 'Two-factor authentication disabled.' }); } catch {}
   };
 
   const verifyTotp = (token: string): boolean => {
@@ -183,11 +226,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ secret, token, window: 2 }),
-      }).catch(() => {});
+      }).catch(() => { /* noop */ });
       return localOk;
     } catch {
       return verifyTotpToken(secret, token, [5, 5]);
     }
+  };
+
+  const refreshSession = () => {
+    try {
+      const raw = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (raw) setUser(JSON.parse(raw));
+    } catch {}
+  };
+
+  const updateUser = (partial: Partial<AuthUser>) => {
+    setUser((prev) => {
+      const next = { ...(prev as AuthUser), ...partial } as AuthUser;
+      try { localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(next)); } catch {}
+      return next;
+    });
   };
 
   const value = useMemo<AuthContextValue>(() => ({
@@ -199,6 +257,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     enableTwoFactor,
     disableTwoFactor,
     verifyTotp,
+    refreshSession,
+    updateUser,
   }), [user]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

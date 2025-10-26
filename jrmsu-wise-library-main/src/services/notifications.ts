@@ -67,6 +67,14 @@ export const NotificationsService = {
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   },
   add(input: Omit<AppNotification, "id" | "status" | "createdAt"> & { status?: NotificationStatus }): AppNotification {
+    // Deduplicate similar messages in the last few entries
+    const existing = readAll();
+    const norm = (s: string) => s.toLowerCase().replace(/\s+/g,' ').trim();
+    const duplicate = existing.slice(0, 10).find(n => norm(n.message) === norm(input.message));
+    if (duplicate) {
+      // Rephrase minimally (AI-like) by appending context marker once
+      input.message = input.message.replace(/\.$/,'') + ' (update)';
+    }
     const item: AppNotification = {
       id: `NT-${Date.now()}-${Math.floor(Math.random() * 1e4)}`,
       status: input.status ?? "unread",

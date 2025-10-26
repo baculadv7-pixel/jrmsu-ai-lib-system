@@ -8,11 +8,18 @@ import AIAssistant from "@/components/Layout/AIAssistant";
 import { exportToPDF, exportToXLSX } from "@/services/reports";
 import { BorrowService } from "@/services/borrow";
 import { BooksService } from "@/services/books";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { StatsService, type LiveStats } from "@/services/stats";
 
 const Reports = () => {
   const userType: "student" | "admin" = "admin";
   const [reportType, setReportType] = useState("all");
+  const [live, setLive] = useState<LiveStats>(StatsService.get());
+  useEffect(() => {
+    const unsub = StatsService.subscribe(setLive);
+    StatsService.start(3000);
+    return unsub;
+  }, []);
 
   const circulationRows = useMemo(() => {
     const all = BorrowService.list();
@@ -119,26 +126,24 @@ const Reports = () => {
               <Card className="shadow-jrmsu">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Total Circulation
+                    Total Books
                   </CardTitle>
                   <TrendingUp className="h-5 w-5 text-primary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">2,345</div>
-                  <p className="text-xs mt-1 text-leaf">+18% from last month</p>
+                  <div className="text-2xl font-bold">{live.totalBooks}</div>
                 </CardContent>
               </Card>
 
               <Card className="shadow-jrmsu">
                 <CardHeader className="flex flex-row items-center justify-between pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Books in Circulation
+                    Borrowed Today
                   </CardTitle>
                   <BookOpen className="h-5 w-5 text-accent" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">456</div>
-                  <p className="text-xs mt-1 text-primary">37% of total inventory</p>
+                  <div className="text-2xl font-bold">{live.borrowedToday}</div>
                 </CardContent>
               </Card>
 
@@ -150,8 +155,7 @@ const Reports = () => {
                   <Users className="h-5 w-5 text-secondary" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">789</div>
-                  <p className="text-xs mt-1 text-leaf">+12% this week</p>
+                  <div className="text-2xl font-bold">{live.activeBorrowers}</div>
                 </CardContent>
               </Card>
 
@@ -163,8 +167,7 @@ const Reports = () => {
                   <AlertCircle className="h-5 w-5 text-destructive" />
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold">23</div>
-                  <p className="text-xs mt-1 text-destructive">-5% from last week</p>
+                  <div className="text-2xl font-bold">{live.overdue}</div>
                 </CardContent>
               </Card>
             </div>

@@ -111,7 +111,17 @@ const RegistrationSecurity = () => {
         
         // Profile data
         phone: data.phone,
-        address: `${data.address || ''} ${data.city || ''} ${data.province || ''}`.trim() || undefined
+        gender: data.gender,
+        birthday: data.birthdate,
+        age: data.age,
+        address: [
+          data.addressStreet,
+          data.addressBarangay,
+          data.addressMunicipality,
+          data.addressProvince,
+          data.addressCountry,
+          data.addressZip
+        ].filter(Boolean).join(', ') || undefined
       };
       
       // Create user in database

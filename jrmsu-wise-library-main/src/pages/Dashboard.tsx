@@ -4,40 +4,25 @@ import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
 import { useAuth } from "@/context/AuthContext";
+import { useEffect, useMemo, useState } from "react";
+import { StatsService, type LiveStats } from "@/services/stats";
 
 const Dashboard = () => {
   const { user } = useAuth();
   const userType: "student" | "admin" = user?.role ?? "student";
 
+  const [live, setLive] = useState<LiveStats>(StatsService.get());
+  useEffect(() => {
+    const unsub = StatsService.subscribe(setLive);
+    StatsService.start(3000);
+    return unsub;
+  }, []);
+
   const stats = [
-    {
-      title: "Total Books",
-      value: "1,234",
-      icon: BookOpen,
-      change: "+12%",
-      color: "text-primary",
-    },
-    {
-      title: "Active Borrowers",
-      value: "456",
-      icon: Users,
-      change: "+5%",
-      color: "text-accent",
-    },
-    {
-      title: "Books Borrowed Today",
-      value: "89",
-      icon: TrendingUp,
-      change: "+23%",
-      color: "text-secondary",
-    },
-    {
-      title: "Overdue Returns",
-      value: "12",
-      icon: Clock,
-      change: "-8%",
-      color: "text-destructive",
-    },
+    { title: "Total Books", value: String(live.totalBooks), icon: BookOpen, change: "", color: "text-primary" },
+    { title: "Active Borrowers", value: String(live.activeBorrowers), icon: Users, change: "", color: "text-accent" },
+    { title: "Books Borrowed Today", value: String(live.borrowedToday), icon: TrendingUp, change: "", color: "text-secondary" },
+    { title: "Overdue Returns", value: String(live.overdue), icon: Clock, change: "", color: "text-destructive" },
   ];
 
   return (
@@ -56,7 +41,7 @@ const Dashboard = () => {
               </p>
             </div>
 
-            {/* Stats Grid */}
+            {/* Stats Grid - real-time */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
               {stats.map((stat, idx) => (
                 <Card key={idx} className="shadow-jrmsu">
@@ -68,9 +53,6 @@ const Dashboard = () => {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold">{stat.value}</div>
-                    <p className={`text-xs mt-1 ${stat.color}`}>
-                      {stat.change} from last month
-                    </p>
                   </CardContent>
                 </Card>
               ))}

@@ -237,7 +237,7 @@ class AIService {
                   fullContent += data.message.content;
                   onChunk(data.message.content);
                 }
-              } catch {}
+              } catch { /* ignore malformed chunk line */ }
             }
           }
         }

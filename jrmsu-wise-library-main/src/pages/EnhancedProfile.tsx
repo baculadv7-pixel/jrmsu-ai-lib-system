@@ -9,15 +9,19 @@ import { Separator } from "@/components/ui/separator";
 import { QrCode, Download, Shield, RotateCcw, Edit, Save, X } from "lucide-react";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
+import AIAssistant from "@/components/Layout/AIAssistant";
 import QRCodeDisplay, { downloadCanvasAsPng } from "@/components/qr/QRCodeDisplay";
 import { ProfilePicture } from "@/components/profile/ProfilePicture";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { useEffect } from "react";
 import { generateUserQR } from "@/services/qr";
+import { databaseService } from "@/services/database";
+import { ActivityService } from "@/services/activity";
+import { NotificationsService } from "@/services/notifications";
 
 const EnhancedProfile = () => {
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { toast } = useToast();
   const userType = user?.role || "student";
   const [qrEnvelope, setQrEnvelope] = useState<string>("");
@@ -26,14 +30,14 @@ const EnhancedProfile = () => {
 
   // Form state for editable fields
   const [formData, setFormData] = useState({
-    // Student-editable fields
-    department: "College of Computer Science",
-    course: "Bachelor of Science in Information Technology",
-    yearLevel: "3rd Year",
-    block: "A",
-    currentAddress: "123 Main Street, Barangay Central, Dipolog City, Zamboanga Del Norte, Philippines 7100",
+    // Student-editable fields (seed from user if available)
+    department: (user?.department as any) || "",
+    course: user?.course || "",
+    yearLevel: (user?.year as any) || "",
+    block: (user?.section as any) || "",
+    currentAddress: (user?.address as any) || "",
     // Profile picture
-    profilePicture: ""
+    profilePicture: (user?.profilePicture as any) || ""
   });
 
   useEffect(() => {
@@ -59,54 +63,33 @@ const EnhancedProfile = () => {
         }
       })();
     }
-  }, [user?.id]);
+  }, [user?.id, user?.role]);
 
-  // Mock user data based on role
-  const getUserData = () => {
-    if (userType === "admin") {
-      return {
-        firstName: "Jhon Mark",
-        middleName: "Amaca",
-        lastName: "Suico",
-        suffix: "",
-        gender: "Male",
-        birthday: "02/20/2004",
-        age: 21,
-        id: user?.id || "KCL-00001",
-        position: "Librarian",
-        email: "suicojm99@gmail.com",
-        contact: "09468861751",
-        street: "Purok 3",
-        barangay: "Barangay Dos",
-        municipality: "Katipunan",
-        province: "Zamboanga Del Norte",
-        country: "Philippines",
-        zipCode: "7109"
-      };
-    } else {
-      return {
-        firstName: "Maria Isabel",
-        middleName: "Santos",
-        lastName: "Rodriguez",
-        suffix: "",
-        gender: "Female",
-        birthday: "05/15/2002",
-        age: 22,
-        id: user?.id || "2024-12345",
-        email: "maria.rodriguez@jrmsu.edu.ph",
-        contact: "09123456789",
-        street: "123 Main Street",
-        barangay: "Barangay Central",
-        municipality: "Dipolog City",
-        province: "Zamboanga Del Norte",
-        country: "Philippines",
-        zipCode: "7100"
-      };
-    }
-  };
+  // Build user data from authenticated session (no mock values)
+  const userData = {
+    firstName: user?.firstName || '',
+    middleName: user?.middleName || '',
+    lastName: user?.lastName || '',
+    suffix: '',
+    gender: (user as any)?.gender || '',
+    birthday: (user as any)?.birthday || '',
+    age: (user as any)?.age || '',
+    id: user?.id || '',
+    // Use position/job title from profile, not auth role
+    position: userType === 'admin' ? ((user as any)?.position || '') : undefined,
+    email: user?.email || '',
+    contact: user?.phone || '',
+    street: (user as any)?.street || '',
+    barangay: (user as any)?.barangay || '',
+    municipality: (user as any)?.municipality || '',
+    province: (user as any)?.province || '',
+    country: (user as any)?.country || '',
+    zipCode: (user as any)?.zipCode || ''
+  } as const;
 
-  const userData = getUserData();
-  const userInitials = `${userData.firstName[0]}${userData.lastName[0]}`.toUpperCase();
+  const userInitials = `${(userData.firstName||'?')[0] || ''}${(userData.lastName||'?')[0] || ''}`.toUpperCase();
+
+  const canEdit = Boolean(user);
 
   // Department and course options
   const departments = [
@@ -135,12 +118,32 @@ const EnhancedProfile = () => {
   const blocks = ["A", "B", "C", "D"];
 
   const handleSave = () => {
-    // Save the form data
+    // Persist to database and session
+    if (!user?.id) return;
+    const updates: any = {
+      department: formData.department,
+      course: formData.course,
+      year: formData.yearLevel,
+      section: formData.block,
+      address: formData.currentAddress,
+      profilePicture: formData.profilePicture,
+    };
+const res = databaseService.updateUser(user.id, updates);
+    ActivityService.log(user.id, 'profile_update');
+    NotificationsService.add({ receiverId: user.id, type: 'system', message: 'Profile updated successfully.' });
+    // Sync auth session
+    try {
+      const raw = localStorage.getItem('jrmsu_auth_session');
+      if (raw) {
+        const sess = JSON.parse(raw);
+        const next = { ...sess, ...updates };
+        localStorage.setItem('jrmsu_auth_session', JSON.stringify(next));
+      }
+    } catch {}
+    // Update in-memory auth user for immediate UI sync
+    try { updateUser(updates); } catch {}
     setIsEditing(false);
-    toast({
-      title: "Profile updated successfully",
-      description: "Your profile information has been saved.",
-    });
+    toast({ title: "Profile updated successfully", description: "Your profile information has been saved." });
   };
 
   const handleCancel = () => {
@@ -181,8 +184,8 @@ const EnhancedProfile = () => {
                 </p>
               </div>
               
-              {/* Edit Button - Only show for students */}
-              {userType === "student" && (
+              {/* Edit Button - for both admin and student */}
+              {canEdit && (
                 <div className="flex gap-2">
                   {isEditing ? (
                     <>
@@ -249,7 +252,8 @@ const EnhancedProfile = () => {
                           const container = document.querySelector("main .h-48.w-48");
                           const canvas = container?.querySelector("canvas") as HTMLCanvasElement;
                           if (canvas) {
-                            downloadCanvasAsPng(canvas, "user-qr.png");
+downloadCanvasAsPng(canvas, "user-qr.png");
+                            if (user?.id) { ActivityService.log(user.id, 'qr_download'); NotificationsService.add({ receiverId: user.id, type: 'system', message: 'QR code downloaded.' }); }
                           }
                         }}
                       >
@@ -262,19 +266,21 @@ const EnhancedProfile = () => {
                           if (user?.id) {
                             try {
                               const resp = await generateUserQR({ userId: user.id, rotate: true });
-                              setQrEnvelope(resp.envelope);
+setQrEnvelope(resp.envelope);
+                              ActivityService.log(user.id, 'qr_regenerate');
+                              NotificationsService.add({ receiverId: user.id, type: 'system', message: 'QR code regenerated.' });
                             } catch (error) {
                               console.error('Failed to regenerate QR code:', error);
                               // Fallback: Generate new QR manually with EXACT structure matching database
                               const fallbackQRData = JSON.stringify({
                                 fullName: user.fullName || `${user.firstName || ''} ${user.lastName || ''}`.trim(),
                                 userId: user.id,
-                                userType: user.userType, // Use userType not role
+                                userType: user.role,
                                 systemId: 'JRMSU-LIBRARY',
-                                systemTag: user.userType === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
+                                systemTag: user.role === 'admin' ? 'JRMSU-KCL' : 'JRMSU-KCS',
                                 timestamp: Date.now(),
                                 sessionToken: btoa(`${user.id}-${Date.now()}`),
-                                role: user.userType === 'admin' ? 'Administrator' : 'Student',
+                                role: user.role === 'admin' ? 'Administrator' : 'Student',
                                 
                                 // RESTORE 2FA setup key for Google Authenticator
                                 ...(user.twoFactorKey ? {
@@ -542,6 +548,7 @@ const EnhancedProfile = () => {
         </main>
       </div>
 
+      <AIAssistant />
     </div>
   );
 };

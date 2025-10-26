@@ -1,4 +1,4 @@
-import { Bell, LogOut } from "lucide-react";
+import { Bell, LogOut, PanelLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -13,6 +13,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useEffect, useMemo, useState } from "react";
 import { NotificationsService, type AppNotification } from "@/services/notifications";
 import { SettingsDropdown } from "@/components/settings/SettingsDropdown";
+import { getViewportMode } from "@/hooks/useViewportMode";
 
 interface NavbarProps {
   userType: "student" | "admin";
@@ -29,6 +30,39 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
     setNotifications(NotificationsService.list());
   };
 
+  const toggleSidebar = () => {
+    const width = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const mode = getViewportMode(width);
+    try {
+      const ch = new BroadcastChannel('jrmsu_sidebar_channel');
+      if (mode === 'mobile') {
+        const KEY_M = 'jrmsu_sidebar_mobile_open';
+        const isOpen = localStorage.getItem(KEY_M) === 'true';
+        const next = !isOpen;
+        localStorage.setItem(KEY_M, String(next));
+        ch.postMessage({ type: 'mobile', value: next });
+      } else {
+        const KEY = 'jrmsu_sidebar_collapsed';
+        const current = localStorage.getItem(KEY) === 'true';
+        const next = !current;
+        localStorage.setItem(KEY, String(next));
+        ch.postMessage({ type: 'toggle', value: next });
+      }
+      ch.close();
+    } catch {
+      // Fallback if BroadcastChannel unsupported: set localStorage only
+      if (mode === 'mobile') {
+        const KEY_M = 'jrmsu_sidebar_mobile_open';
+        const isOpen = localStorage.getItem(KEY_M) === 'true';
+        localStorage.setItem(KEY_M, String(!isOpen));
+      } else {
+        const KEY = 'jrmsu_sidebar_collapsed';
+        const current = localStorage.getItem(KEY) === 'true';
+        localStorage.setItem(KEY, String(!current));
+      }
+    }
+  };
+
   useEffect(() => {
     reload();
     const unsub = NotificationsService.subscribe(reload);
@@ -37,13 +71,25 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
 
   const unreadCount = useMemo(() => notifications.filter((n) => n.status === "unread").length, [notifications]);
 
+  const [filter, setFilter] = useState<'all'|'unread'>('all');
+  const filteredNotifications = useMemo(() => {
+    return filter === 'unread' ? notifications.filter(n=>n.status==='unread') : notifications;
+  }, [notifications, filter]);
+
+  const handleMarkAllRead = () => {
+    // Mark all for current user (ADMIN fallback)
+    const receiverId = (typeof window !== 'undefined' && (window as any).currentUserId) || 'ADMIN';
+    NotificationsService.markAllRead(receiverId);
+    reload();
+  };
+
   const handleLogout = () => {
     signOut();
     navigate("/");
   };
 
   return (
-    <nav className="bg-navy border-b-2 border-secondary sticky top-0 z-50">
+    <nav className="bg-navy border-b-2 border-secondary sticky top-0 z-[60]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-3">
@@ -55,6 +101,12 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Main menu toggle - grows when sidebar is collapsed */}
+            <Button variant="ghost" size="icon" onClick={toggleSidebar} className="text-navy-foreground hover:bg-navy-foreground/10">
+              {/* reactively size via inline style based on localStorage */}
+              <PanelLeft className="transition-all" style={{ height: (localStorage.getItem('jrmsu_sidebar_collapsed') === 'true') ? 24 : 20, width: (localStorage.getItem('jrmsu_sidebar_collapsed') === 'true') ? 24 : 20 }} />
+            </Button>
+
             {/* Notification Bell */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -67,11 +119,16 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
                   )}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-80">
-                <div className="p-2 border-b">
+              <DropdownMenuContent align="end" className="w-96">
+                <div className="p-2 border-b flex items-center justify-between gap-2">
                   <h3 className="font-semibold">Notifications</h3>
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button size="sm" variant="outline" onClick={() => setFilter('all')}>All</Button>
+                    <Button size="sm" variant="outline" onClick={() => setFilter('unread')}>Unread</Button>
+                    <Button size="sm" onClick={handleMarkAllRead}>Mark all read</Button>
+                  </div>
                 </div>
-                {notifications.slice(0, 10).map((n) => (
+                {filteredNotifications.slice(0, 15).map((n) => (
                   <DropdownMenuItem key={n.id} onClick={() => NotificationsService.markRead(n.id)}>
                     <div className="flex flex-col gap-1">
                       <p className="text-sm font-medium">{n.message}</p>
@@ -79,7 +136,7 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
                     </div>
                   </DropdownMenuItem>
                 ))}
-                {notifications.length === 0 && (
+                {filteredNotifications.length === 0 && (
                   <div className="p-3 text-xs text-muted-foreground">No notifications</div>
                 )}
               </DropdownMenuContent>

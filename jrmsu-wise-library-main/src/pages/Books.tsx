@@ -161,14 +161,14 @@ const Books = () => {
         
         <main className="flex-1 p-6">
           <div className="max-w-7xl mx-auto space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <h1 className="text-3xl font-bold text-primary">Book Inventory</h1>
                 <p className="text-muted-foreground mt-1">
                   Browse and manage the library collection
                 </p>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Select value={viewMode} onValueChange={(v:any)=>setView(v)}>
                   <SelectTrigger className="w-36"><SelectValue placeholder="View"/></SelectTrigger>
                   <SelectContent>
@@ -179,7 +179,7 @@ const Books = () => {
                   </SelectContent>
                 </Select>
                 {userType === "admin" && (
-                  <Button>
+                  <Button className="w-full sm:w-auto" onClick={() => (window.location.href = '/book-management?new=1')}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add Book
                   </Button>
@@ -198,8 +198,8 @@ const Books = () => {
                   <Card className="hover:bg-muted cursor-pointer" onClick={()=>alert('Borrowed: '+BorrowService.list().length)}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Borrowed</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-accent">{BorrowService.list().length}</div></CardContent></Card>
                   <Card className="hover:bg-muted cursor-pointer" onClick={()=>alert('Reservations: '+ReservationsService.list().length)}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Reservations</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{ReservationsService.list().length}</div></CardContent></Card>
                 </div>
-                <div className="flex gap-4">
-                  <div className="relative flex-1">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
+                  <div className="relative sm:col-span-2 lg:col-span-3">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input
                       placeholder={useAISearch ? "Ask Jose to help find books..." : "Search books by title, author, or category..."}
@@ -212,7 +212,6 @@ const Books = () => {
                         <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
                       </div>
                     )}
-                    {/* Auto-complete suggestions */}
                     {searchSuggestions.length > 0 && (
                       <div className="absolute top-full left-0 right-0 mt-1 bg-background border rounded-md shadow-lg z-10 max-h-60 overflow-y-auto">
                         {searchSuggestions.map((sug) => (
@@ -234,6 +233,7 @@ const Books = () => {
                     )}
                   </div>
                   <Button
+                    className="w-full"
                     variant={useAISearch ? "default" : "outline"}
                     onClick={() => setUseAISearch(!useAISearch)}
                     title="Toggle AI-powered search"
@@ -242,7 +242,7 @@ const Books = () => {
                     AI Search
                   </Button>
                   <Select value={sortBy} onValueChange={(v:any)=>setSortBy(v)}>
-                    <SelectTrigger className="w-36"><SelectValue placeholder="Sort"/></SelectTrigger>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Sort"/></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="title">Title</SelectItem>
                       <SelectItem value="author">Author</SelectItem>
@@ -251,16 +251,16 @@ const Books = () => {
                       <SelectItem value="shelf">Shelf</SelectItem>
                     </SelectContent>
                   </Select>
-                  <Button variant="outline" onClick={()=>setSortOrder(sortOrder==='asc'?'desc':'asc')}>{sortOrder==='asc'?'A→Z':'Z→A'}</Button>
+                  <Button className="w-full" variant="outline" onClick={()=>setSortOrder(sortOrder==='asc'?'desc':'asc')}>{sortOrder==='asc'?'A→Z':'Z→A'}</Button>
                   <Select value={filterCategory} onValueChange={(v)=>setFilterCategory(v)}>
-                    <SelectTrigger className="w-40"><SelectValue placeholder="Category"/></SelectTrigger>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Category"/></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All</SelectItem>
                       {Array.from(new Set(books.map(b=>b.category))).map(c=>(<SelectItem key={c} value={c.toLowerCase()}>{c}</SelectItem>))}
                     </SelectContent>
                   </Select>
                   <Select value={filterAvailability} onValueChange={(v)=>setFilterAvailability(v)}>
-                    <SelectTrigger className="w-40"><SelectValue placeholder="Availability"/></SelectTrigger>
+                    <SelectTrigger className="w-full"><SelectValue placeholder="Availability"/></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All</SelectItem>
                       <SelectItem value="available">Available</SelectItem>
@@ -279,6 +279,7 @@ const Books = () => {
               </CardHeader>
               <CardContent>
                 {viewMode==='list' && (
+                <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -313,6 +314,7 @@ const Books = () => {
                     ))}
                   </TableBody>
                 </Table>
+                </div>
                 )}
 
                 {viewMode==='compact' && (

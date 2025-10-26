@@ -39,9 +39,9 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
     if (isOpen && admin) {
       generateQRCode();
     }
-  }, [isOpen, admin]);
+  }, [isOpen, admin, generateQRCode]);
 
-  const generateQRCode = async () => {
+  const generateQRCode = React.useCallback(async () => {
     try {
       setIsGeneratingQR(true);
       
@@ -77,7 +77,7 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
     } finally {
       setIsGeneratingQR(false);
     }
-  };
+  }, [formData, toast]);
 
   const handleImageUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];

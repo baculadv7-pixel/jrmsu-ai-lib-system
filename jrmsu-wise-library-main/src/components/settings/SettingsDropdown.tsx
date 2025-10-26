@@ -15,9 +15,6 @@ import {
   Key,
   Eye,
   Timer,
-  Grid,
-  List,
-  Filter,
   Bell,
   Volume2,
   Database,
@@ -37,14 +34,34 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
+import { databaseService } from "@/services/database";
+import { ActivityService } from "@/services/activity";
+import { NotificationsService } from "@/services/notifications";
 
 interface SettingsDropdownProps {
   theme: "light" | "dark" | "system";
   onThemeChange: (theme: "light" | "dark" | "system") => void;
+}
+
+const THEME_KEY = 'jrmsu_theme_mode';
+
+function applyTheme(mode: "light" | "dark" | "system") {
+  const root = document.documentElement;
+  let resolved = mode;
+  if (mode === 'system') {
+    const hour = new Date().getHours();
+    if (hour < 12) resolved = 'light';
+    else if (hour < 18) resolved = 'light'; // neutral tone maps to light palette
+    else resolved = 'dark';
+  }
+  if (resolved === 'dark') root.classList.add('dark'); else root.classList.remove('dark');
+  try { localStorage.setItem(THEME_KEY, mode); } catch { /* noop */ }
 }
 
 export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps) {
@@ -58,8 +75,6 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
     emailNotifications: true,
     smsReminders: false,
     pushNotifications: true,
-    showAvailableOnly: true,
-    bookView: "grid" as "list" | "grid" | "compact",
     autoLogoutTimer: 30,
     voiceResponse: true,
     assistantMode: "Study Helper" as "Study Helper" | "System Guide" | "Technical Support"
@@ -107,15 +122,15 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
             <span>Theme</span>
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
-            <DropdownMenuItem onClick={() => onThemeChange("light")}>
+            <DropdownMenuItem onClick={() => { applyTheme('light'); onThemeChange("light"); }}>
               <Sun className="mr-2 h-4 w-4" />
               <span>Light</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onThemeChange("dark")}>
+            <DropdownMenuItem onClick={() => { applyTheme('dark'); onThemeChange("dark"); }}>
               <Moon className="mr-2 h-4 w-4" />
               <span>Dark</span>
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onThemeChange("system")}>
+            <DropdownMenuItem onClick={() => { applyTheme('system'); onThemeChange("system"); }}>
               <Monitor className="mr-2 h-4 w-4" />
               <span>System</span>
             </DropdownMenuItem>
@@ -130,60 +145,71 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
             <Lock className="mr-2 h-4 w-4" />
             <span>Account Settings</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            <DropdownMenuItem>
-              <Lock className="mr-2 h-4 w-4" />
-              <span>Change Password</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Mail className="mr-2 h-4 w-4" />
-              <span>Manage Email/Mobile</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Activity className="mr-2 h-4 w-4" />
-              <span>Session History</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Key className="mr-2 h-4 w-4" />
-              <span>Recovery Options</span>
-            </DropdownMenuItem>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+          <DropdownMenuSubContent className="w-96">
+            {/* Change Password */}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Change Password</DropdownMenuLabel>
+            <div className="px-2 pb-2 grid grid-cols-1 gap-2">
+              <Input type="password" placeholder="Current Password" id="cpw" />
+              <Input type="password" placeholder="New Password" id="npw" />
+              <Input type="password" placeholder="Confirm New Password" id="rnpw" />
+              <Button
+                size="sm"
+                onClick={() => {
+                  const cpw = (document.getElementById('cpw') as HTMLInputElement)?.value || '';
+                  const npw = (document.getElementById('npw') as HTMLInputElement)?.value || '';
+                  const rnpw = (document.getElementById('rnpw') as HTMLInputElement)?.value || '';
+                  if (npw !== rnpw || npw.length < 8) return alert('Check passwords');
+                  if (!user?.id) return;
+                  // verify then update
+const ok = databaseService.verifyUserPassword(user.id, cpw);
+                  if (!ok) return alert('Invalid current password');
+                  const hash = btoa(`jrmsu_salt_${npw}_${Date.now()}`);
+databaseService.updateUser(user.id, { passwordHash: hash });
+                  ActivityService.log(user.id, 'password_change');
+                  NotificationsService.add({ receiverId: user.id, type: 'system', message: 'Your password was changed.' });
+                  alert('Password updated');
+                }}
+              >Save</Button>
+            </div>
 
-        {/* Library Preferences */}
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>
-            <Eye className="mr-2 h-4 w-4" />
-            <span>Library Preferences</span>
-          </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            <DropdownMenuLabel>Book View</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => handleSettingChange("bookView", "list")}>
-              <List className="mr-2 h-4 w-4" />
-              <span>List View</span>
-              {settings.bookView === "list" && <span className="ml-auto">✓</span>}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleSettingChange("bookView", "grid")}>
-              <Grid className="mr-2 h-4 w-4" />
-              <span>Grid View</span>
-              {settings.bookView === "grid" && <span className="ml-auto">✓</span>}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleSettingChange("bookView", "compact")}>
-              <Filter className="mr-2 h-4 w-4" />
-              <span>Compact View</span>
-              {settings.bookView === "compact" && <span className="ml-auto">✓</span>}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="flex items-center justify-between">
-              <div className="flex items-center">
-                <Filter className="mr-2 h-4 w-4" />
-                <span className="text-sm">Show Available Only</span>
-              </div>
-              <Switch
-                checked={settings.showAvailableOnly}
-                onCheckedChange={(checked) => handleSettingChange("showAvailableOnly", checked)}
-              />
-            </DropdownMenuItem>
+            <Separator className="my-2" />
+            {/* Manage Email/Mobile */}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Manage Email / Mobile</DropdownMenuLabel>
+            <div className="px-2 pb-2 grid grid-cols-1 gap-2">
+              <Input type="email" placeholder="Email" id="acc_email" defaultValue={user?.email || ''} />
+              <Input type="tel" placeholder="Mobile" id="acc_mobile" defaultValue={(user as any)?.phone || ''} />
+              <Button size="sm" onClick={() => {
+                if (!user?.id) return;
+                const email = (document.getElementById('acc_email') as HTMLInputElement)?.value || '';
+                const phone = (document.getElementById('acc_mobile') as HTMLInputElement)?.value || '';
+databaseService.updateUser(user.id, { email, phone });
+                ActivityService.log(user.id, 'email_update', email);
+                ActivityService.log(user.id, 'mobile_update', phone);
+                NotificationsService.add({ receiverId: user.id, type: 'system', message: 'Account contact details updated.' });
+                alert('Saved');
+              }}>Save</Button>
+            </div>
+
+            <Separator className="my-2" />
+            {/* Session History */}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Session History</DropdownMenuLabel>
+            <div className="px-2 pb-2 max-h-40 overflow-auto text-xs">
+{user && databaseService.getLoginRecords(user.id).slice(-10).reverse().map((r:any)=> (
+                <div key={r.id} className="py-1 border-b last:border-0">
+                  <div><b>{r.method}</b> • {new Date(r.timestamp).toLocaleString()}</div>
+                  <div className="text-muted-foreground truncate">{r.userAgent || 'device'}</div>
+                </div>
+              ))}
+            </div>
+
+            <Separator className="my-2" />
+            {/* Recovery Options */}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Recovery Options</DropdownMenuLabel>
+            <div className="px-2 pb-2 grid grid-cols-1 gap-2 text-sm">
+              <Button size="sm" variant="outline">Recovery Email</Button>
+              <Button size="sm" variant="outline">2FA Backup</Button>
+              <Button size="sm" variant="outline">Recovery Codes</Button>
+            </div>
           </DropdownMenuSubContent>
         </DropdownMenuSub>
 
@@ -193,15 +219,30 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
             <Shield className="mr-2 h-4 w-4" />
             <span>Privacy & Security</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
-            <DropdownMenuItem>
-              <Eye className="mr-2 h-4 w-4" />
-              <span>Manage Data Access</span>
-            </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Activity className="mr-2 h-4 w-4" />
-              <span>Recent Account Activity</span>
-            </DropdownMenuItem>
+          <DropdownMenuSubContent className="w-96">
+            {/* Management Access */}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Management Access</DropdownMenuLabel>
+            <div className="px-2 pb-2 max-h-40 overflow-auto text-xs">
+{user && databaseService.getLoginRecords(user.id).slice(-10).reverse().map((r:any)=> (
+                <div key={r.id} className="py-1 border-b last:border-0">
+                  <div>{new Date(r.timestamp).toLocaleString()} • {r.method}</div>
+                  <div className="text-muted-foreground truncate">{r.userAgent || 'device'}</div>
+                </div>
+              ))}
+            </div>
+            <Separator className="my-2" />
+            {/* Recent Account Activity */}
+            <DropdownMenuLabel className="text-xs text-muted-foreground">Recent Account Activity</DropdownMenuLabel>
+            <div className="px-2 pb-2 max-h-40 overflow-auto text-xs">
+{user && ActivityService.list(user.id).slice(0,20).map((a:any)=> (
+                <div key={a.id} className="py-1 border-b last:border-0">
+                  <div><b>{a.action}</b> • {new Date(a.timestamp).toLocaleString()}</div>
+                  {a.details && <div className="text-muted-foreground truncate">{a.details}</div>}
+                </div>
+              ))}
+            </div>
+            <Separator className="my-2" />
+            {/* Auto-Logout */}
             <DropdownMenuItem>
               <Timer className="mr-2 h-4 w-4" />
               <span>Auto-Logout Timer</span>
@@ -226,7 +267,7 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
               </div>
               <Switch
                 checked={settings.emailNotifications}
-                onCheckedChange={(checked) => handleSettingChange("emailNotifications", checked)}
+                onCheckedChange={(checked) => { handleSettingChange("emailNotifications", checked); if (user?.id) ActivityService.log(user.id, 'settings_update', 'email_notifications'); }}
               />
             </DropdownMenuItem>
             <DropdownMenuItem className="flex items-center justify-between">
@@ -236,7 +277,7 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
               </div>
               <Switch
                 checked={settings.smsReminders}
-                onCheckedChange={(checked) => handleSettingChange("smsReminders", checked)}
+                onCheckedChange={(checked) => { handleSettingChange("smsReminders", checked); if (user?.id) ActivityService.log(user.id, 'settings_update', 'sms'); }}
               />
             </DropdownMenuItem>
             <DropdownMenuItem className="flex items-center justify-between">
@@ -246,7 +287,13 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
               </div>
               <Switch
                 checked={settings.pushNotifications}
-                onCheckedChange={(checked) => handleSettingChange("pushNotifications", checked)}
+                onCheckedChange={async (checked) => {
+                  handleSettingChange("pushNotifications", checked);
+                  if (checked && 'Notification' in window) {
+                    try { await Notification.requestPermission(); } catch { /* noop */ }
+                  }
+                  if (user?.id) ActivityService.log(user.id, 'settings_update', 'push');
+                }}
               />
             </DropdownMenuItem>
           </DropdownMenuSubContent>
@@ -258,21 +305,29 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
             <Volume2 className="mr-2 h-4 w-4" />
             <span>AI Assistant</span>
           </DropdownMenuSubTrigger>
-          <DropdownMenuSubContent>
+          <DropdownMenuSubContent className="w-96">
             <DropdownMenuLabel>Assistant Mode</DropdownMenuLabel>
-            <DropdownMenuItem onClick={() => handleSettingChange("assistantMode", "Study Helper")}>
+            <DropdownMenuItem onClick={() => { handleSettingChange("assistantMode", "Study Helper"); if (user?.id) databaseService.updateUser(user.id, { aiMode: 'study' }); }}> 
               <span>Study Helper</span>
               {settings.assistantMode === "Study Helper" && <span className="ml-auto">✓</span>}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleSettingChange("assistantMode", "System Guide")}>
+            <DropdownMenuItem onClick={() => { handleSettingChange("assistantMode", "System Guide"); if (user?.id) databaseService.updateUser(user.id, { aiMode: 'guide' }); }}>
               <span>System Guide</span>
               {settings.assistantMode === "System Guide" && <span className="ml-auto">✓</span>}
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleSettingChange("assistantMode", "Technical Support")}>
+            <DropdownMenuItem onClick={() => { handleSettingChange("assistantMode", "Technical Support"); if (user?.id) databaseService.updateUser(user.id, { aiMode: 'support' }); }}>
               <span>Technical Support</span>
               {settings.assistantMode === "Technical Support" && <span className="ml-auto">✓</span>}
             </DropdownMenuItem>
             <DropdownMenuSeparator />
+            {settings.assistantMode === 'Technical Support' && (
+              <div className="px-2 pb-2 text-sm space-y-1">
+                <div><b>Developer:</b> CS-3</div>
+                <div><b>Name:</b> Jhon Mark A. Suico</div>
+                <div><b>Email:</b> suicojm99@gmail.com</div>
+                <div><b>Contact:</b> 0946-886-1715</div>
+              </div>
+            )}
             <DropdownMenuItem className="flex items-center justify-between">
               <div className="flex items-center">
                 <Volume2 className="mr-2 h-4 w-4" />

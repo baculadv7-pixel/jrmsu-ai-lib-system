@@ -19,6 +19,11 @@ export interface User {
   department?: string;
   role?: string;
   
+  // Extra profile fields captured during registration
+  gender?: string;
+  birthday?: string; // ISO or human date
+  age?: string;
+  
   // Authentication
   passwordHash: string; // Encrypted password
   twoFactorEnabled: boolean;
@@ -39,6 +44,9 @@ export interface User {
   profilePicture?: string; // Base64 or URL
   phone?: string;
   address?: string;
+  
+  // Preferences
+  aiMode?: 'study' | 'guide' | 'support';
 }
 
 export interface LoginRecord {
@@ -280,7 +288,8 @@ class DatabaseService {
       userId: user.id,
       method: "MANUAL",
       success: true,
-      timestamp: new Date()
+      timestamp: new Date(),
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
     });
     
     return { success: true, user };
@@ -484,7 +493,8 @@ class DatabaseService {
       userId: user.id,
       method: "QR_CODE_FORCED", // Always use QR_CODE since 2FA is disabled
       success: true,
-      timestamp: new Date()
+      timestamp: new Date(),
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown'
     });
     
     console.log('✅ ======== DATABASE QR AUTHENTICATION SUCCESS ========');
@@ -536,8 +546,16 @@ class DatabaseService {
       isActive: true,
       profilePicture: userData.profilePicture,
       phone: userData.phone,
-      address: userData.address
+      address: userData.address,
+      aiMode: (userData as any).aiMode
     };
+
+    // Immediately generate standardized QR code for this user (keeps future logins accurate)
+    try {
+      const qr = this.buildStandardUserQR(newUser);
+      newUser.qrCodeData = JSON.stringify(qr);
+      newUser.qrCodeGeneratedAt = new Date();
+    } catch (_) {}
     
     const users = this.getAllUsers();
     users.push(newUser);

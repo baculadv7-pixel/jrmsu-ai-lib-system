@@ -8,10 +8,34 @@ const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
 // Import the supabase client like this:
 // import { supabase } from "@/integrations/supabase/client";
 
-export const supabase = createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
-  auth: {
-    storage: localStorage,
-    persistSession: true,
-    autoRefreshToken: true,
-  }
-});
+// Provide a safe stub when env vars are missing to avoid runtime crashes in non-configured environments
+function createSafeStub() {
+  const stub = {
+    functions: {
+      async invoke(_name: string, _opts?: any) {
+        return { data: null, error: new Error('Supabase is not configured (missing VITE_SUPABASE_URL/KEY)') } as const;
+      }
+    },
+    auth: {
+      onAuthStateChange() {
+        return { data: { subscription: { unsubscribe() {} } } } as any;
+      }
+    }
+  } as any;
+  return stub;
+}
+
+export const supabase = (() => {
+  try {
+    if (SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY) {
+      return createClient<Database>(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+        auth: {
+          storage: localStorage,
+          persistSession: true,
+          autoRefreshToken: true,
+        }
+      });
+    }
+  } catch {}
+  return createSafeStub();
+})();

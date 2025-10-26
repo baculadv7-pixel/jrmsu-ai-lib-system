@@ -9,7 +9,8 @@ export default function ProtectedRoute({
   allow?: Array<"student" | "admin">;
 }) {
   const { isAuthenticated, user } = useAuth();
-  if (!isAuthenticated) return <Navigate to="/" replace />;
+  const hasToken = typeof window !== 'undefined' && !!localStorage.getItem('token');
+  if (!hasToken && !isAuthenticated) return <Navigate to="/" replace />;
   if (allow && user && !allow.includes(user.role)) {
     // Redirect users without permission to a safe page
     return <Navigate to="/dashboard" replace />;
