@@ -165,7 +165,7 @@ export function ForgotPasswordOverlayBody({ onDone, initialId }: { onDone?: () =
     let ok = false;
     try {
       if (u.twoFactorKey) {
-        const r = await fetch('http://127.0.0.1:5001/2fa/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret: u.twoFactorKey, token: totp, window: 5 }) });
+        const r = await fetch('http://localhost:5000/2fa/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret: u.twoFactorKey, token: totp, window: 5 }) });
         ok = r.ok && Boolean((await r.json())?.valid);
       }
     } catch {}

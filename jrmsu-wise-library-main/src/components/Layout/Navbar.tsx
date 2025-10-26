@@ -7,11 +7,13 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import logo from "@/assets/jrmsu-logo.jpg";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useMemo, useState } from "react";
-import { NotificationsService, type AppNotification } from "@/services/notifications";
+import { NotificationsService } from "@/services/notifications";
+import { NotificationsAPI, type NotificationItem } from "@/services/notificationsApi";
 import { SettingsDropdown } from "@/components/settings/SettingsDropdown";
 import { getViewportMode } from "@/hooks/useViewportMode";
 
@@ -23,11 +25,36 @@ interface NavbarProps {
 
 const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
   const navigate = useNavigate();
-  const { signOut } = useAuth();
-  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const { signOut, user } = useAuth();
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [filter, setFilter] = useState<'all'|'unread'>('all');
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string|undefined>(undefined);
+  const [selected, setSelected] = useState<NotificationItem|undefined>(undefined);
 
-  const reload = () => {
-    setNotifications(NotificationsService.list());
+  const reload = async (f: 'all'|'unread'=filter) => {
+    try {
+      if (!user?.id) return;
+      const res = await NotificationsAPI.list({ userId: user.id, filter: f, page: 1, limit: 25 });
+      // Ensure newest -> oldest
+      const items = res.items.slice().sort((a,b)=> (a.created_at < b.created_at ? 1 : -1));
+      setNotifications(items);
+      setUnread(res.unread);
+    } catch {
+      const local = NotificationsService.list(user?.id);
+      const items = local.map(n=>({
+        id: n.id,
+        user_id: user?.id || 'guest',
+        title: 'Notification',
+        body: n.message,
+        type: n.type,
+        created_at: new Date(n.createdAt).getTime()/1000,
+        read: n.status === 'read',
+      })) as NotificationItem[];
+      setNotifications(items.sort((a,b)=> (a.created_at < b.created_at ? 1 : -1)));
+      setUnread(local.filter(n=>n.status==='unread').length);
+    }
   };
 
   const toggleSidebar = () => {
@@ -64,23 +91,41 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
   };
 
   useEffect(() => {
+    if (!user?.id) return;
     reload();
-    const unsub = NotificationsService.subscribe(reload);
-    return () => unsub();
-  }, []);
+    const disconnect = NotificationsAPI.connect(user.id, {
+      onNew: (n) => setNotifications((prev) => [n, ...prev.filter(p=>p.id!==n.id)]),
+      onUpdate: (n) => setNotifications((prev) => prev.map(p=>p.id===n.id?n:p)),
+      onMarkAll: () => setNotifications((prev)=>prev.map(p=>({...p, read: true}))),
+    });
+    return () => disconnect();
+  }, [user?.id]);
 
-  const unreadCount = useMemo(() => notifications.filter((n) => n.status === "unread").length, [notifications]);
+  const unreadCount = useMemo(() => unread ?? notifications.filter((n) => !n.read).length, [unread, notifications]);
+  const filteredNotifications = useMemo(() => (filter === 'unread' ? notifications.filter(n=>!n.read) : notifications), [notifications, filter]);
 
-  const [filter, setFilter] = useState<'all'|'unread'>('all');
-  const filteredNotifications = useMemo(() => {
-    return filter === 'unread' ? notifications.filter(n=>n.status==='unread') : notifications;
-  }, [notifications, filter]);
+  const handleMarkAllRead = async () => {
+    try {
+      if (!user?.id) return;
+      await NotificationsAPI.markAllRead(user.id);
+      await reload(filter);
+    } catch {
+      const receiverId = user?.id || 'ADMIN';
+      NotificationsService.markAllRead(receiverId);
+      reload(filter);
+    }
+  };
 
-  const handleMarkAllRead = () => {
-    // Mark all for current user (ADMIN fallback)
-    const receiverId = (typeof window !== 'undefined' && (window as any).currentUserId) || 'ADMIN';
-    NotificationsService.markAllRead(receiverId);
-    reload();
+  const openNotification = async (id: string) => {
+    if (!user?.id) return;
+    try {
+      const n = await NotificationsAPI.get(user.id, id);
+      setSelected(n);
+      setSelectedId(id);
+      setOverlayOpen(true);
+      // Mark as read if not already
+      if (!n.read) { await NotificationsAPI.markRead(user.id, [id]); await reload(filter); }
+    } catch {}
   };
 
   const handleLogout = () => {
@@ -119,20 +164,24 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
                   )}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-96">
-                <div className="p-2 border-b flex items-center justify-between gap-2">
+              <DropdownMenuContent align="end" className="w-[90vw] sm:w-[26rem] max-w-[95vw]">
+                <div className="p-2 border-b flex items-center justify-between gap-2 sticky top-0 bg-background z-10">
                   <h3 className="font-semibold">Notifications</h3>
                   <div className="ml-auto flex items-center gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setFilter('all')}>All</Button>
-                    <Button size="sm" variant="outline" onClick={() => setFilter('unread')}>Unread</Button>
+                    <Button size="sm" variant={filter==='all'?'default':'outline'} onClick={() => { setFilter('all'); reload('all'); }}>All</Button>
+                    <Button size="sm" variant={filter==='unread'?'default':'outline'} onClick={() => { setFilter('unread'); reload('unread'); }}>Unread ({unreadCount})</Button>
                     <Button size="sm" onClick={handleMarkAllRead}>Mark all read</Button>
                   </div>
                 </div>
-                {filteredNotifications.slice(0, 15).map((n) => (
-                  <DropdownMenuItem key={n.id} onClick={() => NotificationsService.markRead(n.id)}>
-                    <div className="flex flex-col gap-1">
-                      <p className="text-sm font-medium">{n.message}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(n.createdAt).toLocaleString()}</p>
+                {filteredNotifications.slice(0, 25).map((n) => (
+                  <DropdownMenuItem key={n.id} onClick={() => openNotification(n.id)}>
+                    <div className="flex flex-col gap-1 w-full">
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-medium truncate">{n.title || 'Notification'}</p>
+                        {!n.read && <span className="w-2 h-2 rounded-full bg-primary" />}
+                      </div>
+                      <p className="text-xs text-muted-foreground line-clamp-2">{n.body}</p>
+                      <p className="text-xs text-muted-foreground">{new Date(n.created_at*1000).toLocaleString()}</p>
                     </div>
                   </DropdownMenuItem>
                 ))}
@@ -141,6 +190,34 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <Dialog open={overlayOpen} onOpenChange={setOverlayOpen}>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>{selected?.title || 'Notification'}</DialogTitle>
+                  <DialogDescription>{new Date((selected?.created_at||0)*1000).toLocaleString()}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-2">
+                  <p className="text-sm whitespace-pre-wrap">{selected?.body}</p>
+                  {selected?.meta?.requestId && selected?.type === 'password_reset_request' && (
+                    <div className="flex gap-2 pt-2">
+                      <Button size="sm" onClick={async ()=>{
+                        try{
+                          await fetch(`${location.origin.replace(/:\\d+$/,':5000')}/api/auth/admin-respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:selected?.meta?.requestId, action:'grant', adminId: user?.id||'ADMIN'})});
+                          setOverlayOpen(false);
+                        }catch{}
+                      }}>Grant</Button>
+                      <Button size="sm" variant="outline" onClick={async ()=>{
+                        try{
+                          await fetch(`${location.origin.replace(/:\\d+$/,':5000')}/api/auth/admin-respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:selected?.meta?.requestId, action:'decline', adminId: user?.id||'ADMIN'})});
+                          setOverlayOpen(false);
+                        }catch{}
+                      }}>Decline</Button>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
 
             {/* Settings Dropdown */}
             <SettingsDropdown 

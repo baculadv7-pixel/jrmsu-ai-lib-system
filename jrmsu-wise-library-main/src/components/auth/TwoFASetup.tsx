@@ -110,7 +110,7 @@ export default function TwoFASetup({
       // Try Python API first for consistent secrets/URIs
       const ok = await pythonApi.health();
       if (ok) {
-        const resp = await fetch('http://127.0.0.1:5001/2fa/generate', {
+        const resp = await fetch('http://localhost:5000/2fa/generate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ account: user?.id || 'user', issuer: 'JRMSU-LIBRARY' })

@@ -110,11 +110,32 @@ const AIAssistant = () => {
     const userMessage: ChatMessage = { id: `msg_${Date.now()}_user`, role: "user", content: message, timestamp: new Date(), userId: user.id };
     setMessages(prev => [...prev, userMessage]);
     aiService.saveChatMessage(userMessage);
+    const toSend = message;
     setMessage("");
     setIsLoading(true);
     try {
-      const response = await aiService.sendMessage(userMessage.content, user.id, messages.slice(-5));
-      setMessages(prev => [...prev, response]);
+      let streamed = "";
+      const response = await aiService.sendMessageStream(toSend, user.id, messages.slice(-3), (chunk) => {
+        streamed += chunk;
+        // show transient streamed content in UI
+        setMessages(prev => {
+          const last = prev[prev.length-1];
+          if (last && last.id.startsWith('stream_')) {
+            const copy = [...prev];
+            copy[copy.length-1] = { ...last, content: streamed } as any;
+            return copy;
+          }
+          return [...prev, { id: `stream_${Date.now()}`, role: 'assistant', content: chunk, timestamp: new Date(), userId: user.id } as any];
+        });
+      });
+      // Replace transient with final message
+      setMessages(prev => {
+        const copy = [...prev];
+        const idx = copy.findIndex(m => m.id.startsWith('stream_'));
+        if (idx !== -1) copy[idx] = response as any;
+        else copy.push(response as any);
+        return copy;
+      });
     } catch (error) {
       const err: ChatMessage = { id: `msg_${Date.now()}_error`, role: "assistant", content: "I can't connect right now. Please ensure Ollama is running.", timestamp: new Date(), userId: user!.id };
       setMessages(prev => [...prev, err]);
@@ -275,7 +296,7 @@ const AIAssistant = () => {
   );
 
   return (
-    <div className={`fixed z-[95] ${!isOpen ? 'bottom-4 right-4 md:bottom-6 md:right-6' : ''}`}>
+    <div className="fixed z-[95] bottom-4 right-4 md:bottom-6 md:right-6">
       {!isOpen && (
         <Button
           size="lg"
@@ -286,34 +307,11 @@ const AIAssistant = () => {
               const ch = new BroadcastChannel('jrmsu_ai_overlay_channel'); ch.postMessage({ open: true }); ch.close();
             } catch { /* noop */ }
           }}
-          onPointerDown={(e) => {
-            try { (e.currentTarget as any).setPointerCapture(e.pointerId); } catch { /* noop */ }
-            const rectSize = 64; // approx button size
-            const currentX = bubblePos?.x ?? (window.innerWidth - 24 - rectSize);
-            const currentY = bubblePos?.y ?? (window.innerHeight - 24 - rectSize);
-            dragRef.current.dragging = true;
-            dragRef.current.dx = e.clientX - currentX;
-            dragRef.current.dy = e.clientY - currentY;
-          }}
-          onPointerMove={(e) => {
-            if (!dragRef.current.dragging) return;
-            const rectSize = 64;
-            const navH = (document.querySelector('nav') as HTMLElement)?.offsetHeight ?? 64;
-            const topSafe = Math.max(8, navH + 8);
-            const x = Math.min(Math.max(e.clientX - dragRef.current.dx, 8), window.innerWidth - rectSize - 8);
-            const y = Math.min(Math.max(e.clientY - dragRef.current.dy, topSafe), window.innerHeight - rectSize - 8);
-            setBubblePos({ x, y });
-          }}
-          onPointerUp={() => {
-            dragRef.current.dragging = false;
-            try { if (bubblePos) sessionStorage.setItem('ai_bubble_pos', JSON.stringify(bubblePos)); } catch { /* noop */ }
-          }}
-          className={`fixed ${bubblePos ? '' : 'bottom-4 right-4 md:bottom-6 md:right-6'} z-[95] h-16 w-16 rounded-full shadow-jrmsu-gold bg-gradient-to-br from-primary via-primary to-secondary hover:from-primary/90 hover:to-secondary/90 animate-pulse hover:animate-none transition-all`}
-          style={bubblePos ? ({ left: bubblePos.x, top: bubblePos.y } as React.CSSProperties) : undefined}
+          className="h-14 w-14 md:h-16 md:w-16 rounded-full shadow-jrmsu-gold bg-gradient-to-br from-primary via-primary to-secondary hover:from-primary/90 hover:to-secondary/90 transition-all"
           title="Expand Jose (overlay) — Ask anything..."
         >
           <span className="relative inline-flex items-center justify-center w-full h-full" aria-label="Jose">
-            <Bot className="h-7 w-7 text-white drop-shadow" />
+            <Bot className="h-6 w-6 md:h-7 md:w-7 text-white drop-shadow" />
           </span>
         </Button>
       )}
@@ -321,16 +319,16 @@ const AIAssistant = () => {
       {isOpen && (
         isFullscreen ? (
           <div className="fixed inset-0 z-[90] bg-black/30 backdrop-blur-sm flex items-center justify-center transition-opacity">
-            <Card className="w-[min(960px,95vw)] h-[90vh] rounded-xl shadow-jrmsu flex flex-col overflow-hidden transition-all duration-200 ease-out">
-              {Header}
-              <div className="flex-1 flex flex-col">{Body}</div>
+            <Card className="w-[min(960px,95vw)] h-[90vh] rounded-xl shadow-jrmsu flex flex-col transition-all duration-200 ease-out">
+              <div className="sticky top-0 z-20">{Header}</div>
+              <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">{Body}</div>
             </Card>
           </div>
         ) : (
           <div className="fixed bottom-20 right-4 md:bottom-24 md:right-6 z-[90]">
-            <Card className="w-[95vw] sm:w-[95vw] md:w-[60vw] lg:w-[40vw] xl:w-[35vw] h-[85vh] md:h-[70vh] rounded-xl shadow-jrmsu flex flex-col overflow-hidden transition-all duration-200 ease-out">
-              {Header}
-              <div className="flex-1 flex flex-col">{Body}</div>
+            <Card className="w-[95vw] sm:w-[95vw] md:w-[60vw] lg:w-[40vw] xl:w-[35vw] h-[85vh] md:h-[70vh] rounded-xl shadow-jrmsu flex flex-col transition-all duration-200 ease-out">
+              <div className="sticky top-0 z-20">{Header}</div>
+              <div className="flex-1 min-h-0 overflow-y-auto flex flex-col">{Body}</div>
             </Card>
           </div>
         )

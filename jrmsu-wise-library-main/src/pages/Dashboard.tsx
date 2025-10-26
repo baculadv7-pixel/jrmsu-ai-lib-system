@@ -4,25 +4,30 @@ import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
 import { useAuth } from "@/context/AuthContext";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { StatsService, type LiveStats } from "@/services/stats";
+import { ActivityService, type ActivityRecord } from "@/services/activity";
 
 const Dashboard = () => {
   const { user } = useAuth();
   const userType: "student" | "admin" = user?.role ?? "student";
 
   const [live, setLive] = useState<LiveStats>(StatsService.get());
+  const [activity, setActivity] = useState<ActivityRecord[]>([]);
   useEffect(() => {
-    const unsub = StatsService.subscribe(setLive);
+    const unsubStats = StatsService.subscribe(setLive);
     StatsService.start(3000);
-    return unsub;
+    const refresh = () => setActivity(ActivityService.list());
+    const unsubAct = ActivityService.subscribe(refresh);
+    refresh();
+    return () => { unsubStats(); unsubAct(); };
   }, []);
 
   const stats = [
-    { title: "Total Books", value: String(live.totalBooks), icon: BookOpen, change: "", color: "text-primary" },
-    { title: "Active Borrowers", value: String(live.activeBorrowers), icon: Users, change: "", color: "text-accent" },
-    { title: "Books Borrowed Today", value: String(live.borrowedToday), icon: TrendingUp, change: "", color: "text-secondary" },
-    { title: "Overdue Returns", value: String(live.overdue), icon: Clock, change: "", color: "text-destructive" },
+    { title: "Total Books", value: String(live.totalBooks), icon: BookOpen, color: "text-primary" },
+    { title: "Active Borrowers", value: String(live.activeBorrowers), icon: Users, color: "text-accent" },
+    { title: "Books Borrowed Today", value: String(live.borrowedToday), icon: TrendingUp, color: "text-secondary" },
+    { title: "Overdue Returns", value: String(live.overdue), icon: Clock, color: "text-destructive" },
   ];
 
   return (
@@ -58,26 +63,26 @@ const Dashboard = () => {
               ))}
             </div>
 
-            {/* Recent Activity */}
+            {/* Real-time Recent Activity (from backend/local log) */}
             <Card className="shadow-jrmsu">
               <CardHeader>
                 <CardTitle>Recent Activity</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {[1, 2, 3, 4].map((i) => (
-                    <div key={i} className="flex items-center justify-between py-3 border-b last:border-0">
-                      <div className="flex items-center gap-4">
-                        <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                          <BookOpen className="h-5 w-5 text-primary" />
-                        </div>
+                <div className="max-h-[40vh] overflow-y-auto divide-y">
+                  {activity.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">No recent activity</p>
+                  ) : (
+                    activity.slice(0, 25).map((a) => (
+                      <div key={a.id} className="py-3 flex items-center justify-between">
                         <div>
-                          <p className="font-medium">Student borrowed "Introduction to AI"</p>
-                          <p className="text-sm text-muted-foreground">2 hours ago</p>
+                          <p className="text-sm font-medium">{a.action.replace(/_/g,' ')}</p>
+                          {a.details && <p className="text-xs text-muted-foreground">{a.details}</p>}
                         </div>
+                        <p className="text-xs text-muted-foreground whitespace-nowrap">{new Date(a.timestamp).toLocaleString()}</p>
                       </div>
-                    </div>
-                  ))}
+                    ))
+                  )}
                 </div>
               </CardContent>
             </Card>

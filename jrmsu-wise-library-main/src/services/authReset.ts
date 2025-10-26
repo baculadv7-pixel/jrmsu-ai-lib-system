@@ -16,7 +16,7 @@ async function post(path: string, body: Json): Promise<any> {
   // Fallback: if we accidentally hit the frontend origin (8080) or 404, retry backend default
   if (!r.ok && (location.origin.includes("8080") || r.status === 404)) {
     try {
-      const fallbackBase = "http://127.0.0.1:5001";
+      const fallbackBase = "http://localhost:5000";
       // Map legacy /api/auth/* to backend /auth/* if needed
       const mappedPath = path.startsWith("/api/auth/") ? path.replace("/api/auth/", "/auth/") : path;
       url = `${fallbackBase}${mappedPath}`;

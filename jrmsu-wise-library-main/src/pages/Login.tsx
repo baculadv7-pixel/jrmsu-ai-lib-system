@@ -283,7 +283,7 @@ const Login = () => {
                   let ok = false;
                   try {
                     if (secret) {
-                      const r = await fetch('http://127.0.0.1:5001/2fa/verify', {
+                      const r = await fetch('http://localhost:5000/2fa/verify', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ secret, token: twoFACode, window: 5 })
                       });

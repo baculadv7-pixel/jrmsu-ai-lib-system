@@ -51,6 +51,29 @@ const Reports = () => {
 
   const overdueRows = useMemo(() => circulationRows.filter((r) => r.Status === "overdue"), [circulationRows]);
 
+  // Real-time top borrowed and category distribution recompute on stats tick
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const unsub = StatsService.subscribe(() => setTick((t)=>t+1));
+    StatsService.start(3000);
+    return unsub;
+  }, []);
+  const topBorrowed = useMemo(() => {
+    const counts: Record<string, number> = {};
+    BorrowService.list().forEach(b => { counts[b.bookTitle] = (counts[b.bookTitle]||0)+1; });
+    return Object.entries(counts)
+      .map(([title, borrows]) => ({ title, borrows }))
+      .sort((a,b)=> b.borrows - a.borrows)
+      .slice(0,5);
+  }, [tick]);
+  const categoryDist = useMemo(() => {
+    const counts: Record<string, number> = {};
+    const books = BooksService.list();
+    books.forEach(b => { counts[b.category] = (counts[b.category]||0)+1; });
+    const total = books.length || 1;
+    return Object.entries(counts).map(([category, count]) => ({ category, percentage: Math.round((count/total)*100) }));
+  }, [tick]);
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar userType={userType} />
@@ -180,23 +203,21 @@ const Reports = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {[
-                      { title: "Introduction to AI", borrows: 45 },
-                      { title: "Data Structures", borrows: 38 },
-                      { title: "Web Development", borrows: 32 },
-                      { title: "Database Systems", borrows: 28 },
-                      { title: "Machine Learning", borrows: 25 },
-                    ].map((book, idx) => (
-                      <div key={idx} className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
-                            {idx + 1}
+                    {topBorrowed.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No data</p>
+                    ) : (
+                      topBorrowed.map((book, idx) => (
+                        <div key={book.title} className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-bold text-primary">
+                              {idx + 1}
+                            </div>
+                            <span className="font-medium">{book.title}</span>
                           </div>
-                          <span className="font-medium">{book.title}</span>
+                          <span className="text-sm text-muted-foreground">{book.borrows} borrows</span>
                         </div>
-                        <span className="text-sm text-muted-foreground">{book.borrows} borrows</span>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -207,26 +228,21 @@ const Reports = () => {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-4">
-                    {[
-                      { category: "Computer Science", percentage: 35 },
-                      { category: "Engineering", percentage: 25 },
-                      { category: "Business", percentage: 20 },
-                      { category: "Arts & Humanities", percentage: 12 },
-                      { category: "Natural Sciences", percentage: 8 },
-                    ].map((cat, idx) => (
-                      <div key={idx} className="space-y-2">
-                        <div className="flex items-center justify-between text-sm">
-                          <span className="font-medium">{cat.category}</span>
-                          <span className="text-muted-foreground">{cat.percentage}%</span>
+                    {categoryDist.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">No data</p>
+                    ) : (
+                      categoryDist.map((cat) => (
+                        <div key={cat.category} className="space-y-2">
+                          <div className="flex items-center justify-between text-sm">
+                            <span className="font-medium">{cat.category}</span>
+                            <span className="text-muted-foreground">{cat.percentage}%</span>
+                          </div>
+                          <div className="h-2 bg-muted rounded-full overflow-hidden">
+                            <div className="h-full bg-primary" style={{ width: `${cat.percentage}%` }} />
+                          </div>
                         </div>
-                        <div className="h-2 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary"
-                            style={{ width: `${cat.percentage}%` }}
-                          />
-                        </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </CardContent>
               </Card>

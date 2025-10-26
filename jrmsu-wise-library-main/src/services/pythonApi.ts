@@ -2,13 +2,13 @@
 export const pythonApi = {
   async health(): Promise<boolean> {
     try {
-      const r = await fetch("http://127.0.0.1:5001/health");
+      const r = await fetch("http://localhost:5000/health");
       return r.ok;
     } catch { return false; }
   },
   async verifyTotp(secret: string, token: string): Promise<boolean> {
     try {
-      const r = await fetch("http://127.0.0.1:5001/2fa/verify", {
+      const r = await fetch("http://localhost:5000/2fa/verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ secret, token, window: 3 })
@@ -20,7 +20,7 @@ export const pythonApi = {
   },
   async validateQr(data: string): Promise<{ valid: boolean; error?: string }> {
     try {
-      const r = await fetch("http://127.0.0.1:5001/qr/validate", {
+      const r = await fetch("http://localhost:5000/qr/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ data })
