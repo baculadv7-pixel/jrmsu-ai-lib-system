@@ -11,6 +11,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { databaseService, User } from "@/services/database";
 import { qrCodeService } from "@/services/qrcode";
+import Admin2FAOverlay from "@/components/settings/Admin2FAOverlay";
+import { pythonApi } from "@/services/pythonApi";
+import { ActivityService } from "@/services/activity";
+import { NotificationsService } from "@/services/notifications";
 
 interface AdminProfileModalProps {
   admin: User;
@@ -33,6 +37,7 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
   const [profileImage, setProfileImage] = useState<string>(admin.profilePicture || '');
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [isGeneratingQR, setIsGeneratingQR] = useState(false);
+  const [open2FA, setOpen2FA] = useState(false);
 
 const generateQRCode = useCallback(async () => {
     try {
@@ -154,49 +159,42 @@ useEffect(() => {
     try {
       // Validate required fields
       if (!formData.firstName?.trim() || !formData.lastName?.trim()) {
-        toast({
-          title: "Validation Error",
-          description: "First name and last name are required.",
-          variant: "destructive"
-        });
+        toast({ title: "Validation Error", description: "First name and last name are required.", variant: "destructive" });
         return;
       }
-
       if (!formData.email?.trim()) {
-        toast({
-          title: "Validation Error",
-          description: "Email address is required.",
-          variant: "destructive"
-        });
+        toast({ title: "Validation Error", description: "Email address is required.", variant: "destructive" });
+        return;
+      }
+      if (!formData.role && !(formData as any).position) {
+        toast({ title: "Validation Error", description: "Position / Role is required.", variant: "destructive" });
         return;
       }
 
-      // Update fullName based on first and last name
-      const updatedAdmin = {
+      // Normalize position/role and name
+      const position = (formData as any).position || formData.role;
+      const updatedAdmin: User = {
         ...formData,
+        role: position as any,
+        // keep a separate 'position' field for clarity
+        ...(position ? { position } : {}),
         fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
         updatedAt: new Date().toISOString()
-      };
+      } as User;
 
-      // Update in database
+      // Update in local database and backend
       const result = databaseService.updateUser(updatedAdmin.id, updatedAdmin);
+      try { await pythonApi.updateUser(updatedAdmin.id, { ...updatedAdmin }); } catch {}
       
       if (result.success) {
         onSave(updatedAdmin);
-        toast({
-          title: "Admin Updated",
-          description: "Administrator profile has been successfully updated.",
-        });
+        toast({ title: "Admin Updated", description: "Administrator profile has been successfully updated." });
       } else {
         throw new Error(result.error);
       }
     } catch (error) {
       console.error('Error updating admin:', error);
-      toast({
-        title: "Update Failed",
-        description: "Failed to update administrator profile.",
-        variant: "destructive"
-      });
+      toast({ title: "Update Failed", description: "Failed to update administrator profile.", variant: "destructive" });
     }
   };
 
@@ -224,6 +222,18 @@ useEffect(() => {
         </div>
 
         <div className="p-6 space-y-6">
+          <Admin2FAOverlay
+            isOpen={open2FA}
+            onClose={() => setOpen2FA(false)}
+            userId={formData.id}
+            userName={formData.fullName}
+            userEmail={formData.email}
+            onEnabledChange={(enabled)=>{
+              setFormData(prev=>({ ...prev, twoFactorEnabled: enabled }));
+              try { ActivityService.log(formData.id, enabled ? '2fa_enable' : '2fa_disable'); } catch {}
+              try { NotificationsService.add({ receiverId: formData.id, type: 'system', message: enabled ? '2FA enabled by admin.' : '2FA disabled by admin.' }); } catch {}
+            }}
+          />
           {/* Profile Picture and QR Code */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Profile Picture Section */}
@@ -344,46 +354,33 @@ useEffect(() => {
             <Label className="text-base font-semibold">Administrative Details</Label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="department">Department</Label>
+                <Label htmlFor="position">Position / Role *</Label>
                 <Select
-                  value={formData.department || ''}
-                  onValueChange={(value) => handleInputChange('department', value)}
+                  value={(formData as any).position || formData.role || ''}
+                  onValueChange={(value) => { handleInputChange('role', value as any); setFormData(prev=>({ ...prev, position: value as any })); }}
                 >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select department" />
+                  <SelectTrigger id="position">
+                    <SelectValue placeholder="Select Position" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Library Services">Library Services</SelectItem>
-                    <SelectItem value="IT Department">IT Department</SelectItem>
-                    <SelectItem value="Academic Affairs">Academic Affairs</SelectItem>
-                    <SelectItem value="Student Affairs">Student Affairs</SelectItem>
-                    <SelectItem value="Finance">Finance</SelectItem>
-                    <SelectItem value="Human Resources">Human Resources</SelectItem>
-                    <SelectItem value="Facilities Management">Facilities Management</SelectItem>
+                    <SelectItem value="admin">Admin</SelectItem>
+                    <SelectItem value="assistant">Assistant</SelectItem>
+                    <SelectItem value="staff">Staff</SelectItem>
+                    <SelectItem value="librarian">Librarian</SelectItem>
+                    <SelectItem value="supervisor">Supervisor</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="role">Role</Label>
-                <Select
-                  value={formData.role || ''}
-                  onValueChange={(value) => handleInputChange('role', value)}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select role" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="System Administrator">System Administrator</SelectItem>
-                    <SelectItem value="Library Manager">Library Manager</SelectItem>
-                    <SelectItem value="IT Specialist">IT Specialist</SelectItem>
-                    <SelectItem value="Academic Coordinator">Academic Coordinator</SelectItem>
-                    <SelectItem value="Student Services Coordinator">Student Services Coordinator</SelectItem>
-                    <SelectItem value="Finance Manager">Finance Manager</SelectItem>
-                    <SelectItem value="HR Specialist">HR Specialist</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="systemTag">System Tag</Label>
+                <Input
+                  id="systemTag"
+                  value={formData.systemTag || ''}
+                  onChange={(e) => handleInputChange('systemTag', e.target.value)}
+                  placeholder="JRMSU-KCL"
+                />
               </div>
-            </div>
+          </div>
           </div>
 
           {/* Security Settings */}
@@ -391,37 +388,16 @@ useEffect(() => {
             <Label className="text-base font-semibold">Security Settings</Label>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="systemTag">System Tag</Label>
-                <Input
-                  id="systemTag"
-                  value={formData.systemTag || ''}
-                  onChange={(e) => handleInputChange('systemTag', e.target.value)}
-                  placeholder="Enter system tag"
-                />
+                <Label>Enable Two-Factor Authentication</Label>
+                <Button variant="outline" onClick={() => setOpen2FA(true)}>Enable 2FA</Button>
+                <p className="text-xs text-muted-foreground">Syncs globally to Authentication & 2FA page</p>
               </div>
-              <div className="flex items-center space-x-3">
-                <Switch
-                  id="twoFactorEnabled"
-                  checked={formData.twoFactorEnabled || false}
-                  onCheckedChange={(checked) => handleInputChange('twoFactorEnabled', checked)}
-                />
-                <Label htmlFor="twoFactorEnabled">Enable Two-Factor Authentication</Label>
-              </div>
-              <div className="flex items-center space-x-3">
-                <Switch
-                  id="qrCodeActive"
-                  checked={formData.qrCodeActive || false}
-                  onCheckedChange={(checked) => handleInputChange('qrCodeActive', checked)}
-                />
-                <Label htmlFor="qrCodeActive">Enable QR Code Login</Label>
-              </div>
-              <div className="flex items-center space-x-3">
-                <Switch
-                  id="isActive"
-                  checked={formData.isActive ?? true}
-                  onCheckedChange={(checked) => handleInputChange('isActive', checked)}
-                />
-                <Label htmlFor="isActive">Account Active</Label>
+              <div className="space-y-2">
+                <Label>Account Active</Label>
+                <div className="flex items-center justify-between p-2 border rounded-lg bg-muted/30">
+                  <span className="text-sm text-muted-foreground">Toggle account availability</span>
+                  <Switch checked={!!formData.isActive} onCheckedChange={(val)=> setFormData(prev=>({ ...prev, isActive: Boolean(val) }))} />
+                </div>
               </div>
             </div>
           </div>

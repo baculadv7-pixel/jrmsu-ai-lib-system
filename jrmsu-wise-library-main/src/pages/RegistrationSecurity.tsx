@@ -98,11 +98,10 @@ const RegistrationSecurity = () => {
         
         // Student-specific fields
         course: data.role === "student" ? data.course : undefined,
-        year: data.role === "student" ? data.year : undefined,
-        section: data.role === "student" ? data.section : undefined,
+        year: data.role === "student" ? data.yearLevel : undefined,
+        section: data.role === "student" ? data.block : undefined,
         
         // Admin-specific fields
-        department: data.role === "admin" ? data.department : undefined,
         role: data.role === "admin" ? data.position : undefined,
         
         // Authentication - hash the password properly in production
@@ -132,6 +131,15 @@ const RegistrationSecurity = () => {
       }
       
       console.log('✅ User created successfully:', createResult.user?.id);
+
+      try {
+        // Also persist to Python backend for global sync
+        await fetch('http://localhost:5000/api/users/' + encodeURIComponent(userId), {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(userData)
+        });
+      } catch {}
       
       // Generate QR Code with enhanced data
       const qrCode = generateQRCode();

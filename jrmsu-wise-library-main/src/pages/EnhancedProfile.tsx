@@ -19,6 +19,7 @@ import { generateUserQR } from "@/services/qr";
 import { databaseService } from "@/services/database";
 import { ActivityService } from "@/services/activity";
 import { NotificationsService } from "@/services/notifications";
+import { pythonApi } from "@/services/pythonApi";
 
 const EnhancedProfile = () => {
   const { user, updateUser } = useAuth();
@@ -44,6 +45,22 @@ const EnhancedProfile = () => {
     if (user?.id) {
       (async () => {
         try {
+          // load full profile from backend then generate QR
+          try {
+            const r = await pythonApi.getUser(user.id);
+            if (r) {
+              try { updateUser(r); } catch {}
+              setFormData(prev => ({
+                ...prev,
+                department: r.department ?? prev.department,
+                course: r.course ?? prev.course,
+                yearLevel: r.year ?? prev.yearLevel,
+                block: r.section ?? prev.block,
+                currentAddress: r.address ?? prev.currentAddress,
+                profilePicture: r.profilePicture ?? prev.profilePicture,
+              }));
+            }
+          } catch {}
           const resp = await generateUserQR({ userId: user.id });
           setQrEnvelope(resp.envelope);
         } catch (error) {
@@ -75,16 +92,17 @@ const EnhancedProfile = () => {
     birthday: (user as any)?.birthday || '',
     age: (user as any)?.age || '',
     id: user?.id || '',
-    // Use position/job title from profile, not auth role
-    position: userType === 'admin' ? ((user as any)?.position || '') : undefined,
+    // Position/job title for admin: fallback to role if position missing
+    position: userType === 'admin' ? (((user as any)?.position) || (user as any)?.role || '') : undefined,
     email: user?.email || '',
-    contact: user?.phone || '',
+    contact: (user as any)?.phone || (user as any)?.contact || '',
     street: (user as any)?.street || '',
     barangay: (user as any)?.barangay || '',
     municipality: (user as any)?.municipality || '',
     province: (user as any)?.province || '',
     country: (user as any)?.country || '',
-    zipCode: (user as any)?.zipCode || ''
+    zipCode: (user as any)?.zipCode || '',
+    addressFull: (user as any)?.address || ''
   } as const;
 
   const userInitials = `${(userData.firstName||'?')[0] || ''}${(userData.lastName||'?')[0] || ''}`.toUpperCase();
@@ -117,7 +135,7 @@ const EnhancedProfile = () => {
   const yearLevels = ["1st Year", "2nd Year", "3rd Year", "4th Year"];
   const blocks = ["A", "B", "C", "D"];
 
-  const handleSave = () => {
+const handleSave = async () => {
     // Persist to database and session
     if (!user?.id) return;
     const updates: any = {
@@ -129,6 +147,7 @@ const EnhancedProfile = () => {
       profilePicture: formData.profilePicture,
     };
 const res = databaseService.updateUser(user.id, updates);
+    try { await pythonApi.updateUser(user.id, updates); } catch {}
     ActivityService.log(user.id, 'profile_update');
     NotificationsService.add({ receiverId: user.id, type: 'system', message: 'Profile updated successfully.' });
     // Sync auth session
@@ -507,9 +526,7 @@ setQrEnvelope(resp.envelope);
                     />
                   ) : (
                     <p className="font-medium p-2 bg-white/70 rounded border">
-                      {userType === "student" ? formData.currentAddress : 
-                        `${userData.street}, ${userData.barangay}, ${userData.municipality}, ${userData.province}, ${userData.country} ${userData.zipCode}`
-                      }
+                      {userType === "student" ? formData.currentAddress : (userData.addressFull || [userData.street, userData.barangay, userData.municipality, userData.province, userData.country, userData.zipCode].filter(Boolean).join(', '))}
                     </p>
                   )}
                   {userType === "admin" && (

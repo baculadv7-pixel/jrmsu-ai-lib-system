@@ -44,9 +44,27 @@ const AdminManagement = () => {
   const [filterRole, setFilterRole] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
-  // Load admins from database
+  // Load admins from database and backend
   useEffect(() => {
     loadAdmins();
+    let t: any = null;
+    const tick = async () => {
+      try {
+        const mod = await import('@/services/pythonApi');
+        const res: any = await (mod as any).pythonApi.listUsers();
+        const items = (res?.items || []) as any[];
+        const admins = items.filter(u => (u.userType === 'admin')) as User[];
+        if (admins?.length) setAdmins(prev => {
+          // merge by id to keep local fields
+          const map = new Map<string, User>();
+          [...prev, ...admins].forEach(u => map.set(u.id, { ...(map.get(u.id) as any), ...u } as User));
+          return Array.from(map.values());
+        });
+      } catch {}
+    };
+    tick();
+    t = setInterval(tick, 5000);
+    return () => { if (t) clearInterval(t); };
   }, []);
 
   // Get unique filter values

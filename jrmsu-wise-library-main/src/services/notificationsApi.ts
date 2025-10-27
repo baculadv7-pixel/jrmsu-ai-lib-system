@@ -35,7 +35,7 @@ async function getIO() {
 
 export const NotificationsAPI = {
   async list(params: { userId: string; filter?: "all"|"unread"; page?: number; limit?: number }) {
-    const url = new URL(`${API.BASE}/api/notifications`);
+    const url = new URL(`${API.BACKEND.BASE}/api/notifications`);
     if (params.filter) url.searchParams.set("filter", params.filter);
     if (params.page) url.searchParams.set("page", String(params.page));
     if (params.limit) url.searchParams.set("limit", String(params.limit));
@@ -47,7 +47,7 @@ export const NotificationsAPI = {
     return r.json() as Promise<{ items: NotificationItem[]; total: number; unread: number }>;
   },
   async markRead(userId: string, ids: string[]) {
-    const r = await fetch(`${API.BASE}/api/notifications/mark-read`, {
+    const r = await fetch(`${API.BACKEND.BASE}/api/notifications/mark-read`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-User-Id": userId },
       credentials: "include",
@@ -57,7 +57,7 @@ export const NotificationsAPI = {
     return r.json();
   },
   async markAllRead(userId: string) {
-    const r = await fetch(`${API.BASE}/api/notifications/mark-all-read`, {
+    const r = await fetch(`${API.BACKEND.BASE}/api/notifications/mark-all-read`, {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-User-Id": userId },
       credentials: "include",
@@ -66,7 +66,7 @@ export const NotificationsAPI = {
     return r.json();
   },
   async get(userId: string, id: string) {
-    const r = await fetch(`${API.BASE}/api/notifications/${id}`, {
+    const r = await fetch(`${API.BACKEND.BASE}/api/notifications/${id}`, {
       headers: { "Content-Type": "application/json", "X-User-Id": userId },
       credentials: "include",
     });
@@ -84,7 +84,7 @@ export const NotificationsAPI = {
       try {
         const io = await getIO();
         if (cancelled) return;
-        socket = io(API.BASE, { transports: ["websocket"], withCredentials: true, query: { userId } });
+        socket = io(API.BACKEND.BASE, { transports: ["websocket"], withCredentials: true, query: { userId } });
         socket.on("connected", () => {});
         socket.on("notification.new", (n: NotificationItem) => handlers.onNew?.(n));
         socket.on("notification.update", (n: NotificationItem) => handlers.onUpdate?.(n));

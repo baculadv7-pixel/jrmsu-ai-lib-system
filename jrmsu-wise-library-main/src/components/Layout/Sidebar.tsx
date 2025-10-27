@@ -95,9 +95,11 @@ const Sidebar = ({ userType }: SidebarProps) => {
             )
           }
         >
-          <item.icon className="h-5 w-5" />
+          <item.icon className="h-5 w-5 flex-none" />
           {(mode === 'mobile' || !collapsed) && (
-            <span className="font-medium truncate">{item.label}</span>
+            <span className="font-medium truncate whitespace-nowrap overflow-hidden flex-1 min-w-0">
+              {item.label}
+            </span>
           )}
         </NavLink>
       ))}
@@ -110,9 +112,9 @@ const Sidebar = ({ userType }: SidebarProps) => {
       <>
         {mobileOpen && (
           <div className="fixed inset-0 z-50">
-            <div className="absolute inset-0 bg-black/40" onClick={() => { localStorage.setItem(MOBILE_KEY, 'false'); setMobileOpen(false); }} />
+            <div className="absolute inset-0 bg-black/45" onClick={() => { localStorage.setItem(MOBILE_KEY, 'false'); setMobileOpen(false); }} />
             <aside className={cn(
-              "absolute left-0 top-0 h-full w-[80vw] max-w-[18rem] bg-card border-r shadow-sm overflow-y-auto scroll-smooth transform transition-transform duration-200",
+              "absolute left-0 top-0 h-full w-[80vw] max-w-[18rem] bg-card border-r shadow-sm overflow-y-auto scroll-smooth transform transition-transform duration-200 z-50",
               mobileOpen ? "translate-x-0" : "-translate-x-full"
             )}>
               {AsideInner}
@@ -125,8 +127,8 @@ const Sidebar = ({ userType }: SidebarProps) => {
 
   return (
     <aside className={cn(
-      "bg-card border-r shadow-sm overflow-y-auto scroll-smooth sticky top-16 self-start h-[calc(100vh-4rem)]",
-      collapsed || mode === 'tablet' ? "w-16" : "w-64"
+      "bg-card border-r shadow-sm overflow-y-auto scroll-smooth sticky top-16 self-start min-h-[calc(100vh-4rem)] h-[calc(100vh-4rem)] shrink-0 flex flex-col z-30",
+      collapsed || mode === 'tablet' ? "w-16 min-w-16" : "w-64 min-w-64"
     )}>
       {AsideInner}
     </aside>

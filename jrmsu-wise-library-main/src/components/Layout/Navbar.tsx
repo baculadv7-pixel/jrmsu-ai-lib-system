@@ -16,6 +16,7 @@ import { NotificationsService } from "@/services/notifications";
 import { NotificationsAPI, type NotificationItem } from "@/services/notificationsApi";
 import { SettingsDropdown } from "@/components/settings/SettingsDropdown";
 import { getViewportMode } from "@/hooks/useViewportMode";
+import { API } from "@/config/api";
 
 interface NavbarProps {
   userType: "student" | "admin";
@@ -203,13 +204,13 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
                     <div className="flex gap-2 pt-2">
                       <Button size="sm" onClick={async ()=>{
                         try{
-                          await fetch(`${location.origin.replace(/:\\d+$/,':5000')}/api/auth/admin-respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:selected?.meta?.requestId, action:'grant', adminId: user?.id||'ADMIN'})});
+await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:selected?.meta?.requestId, action:'grant', adminId: user?.id||'ADMIN'})});
                           setOverlayOpen(false);
                         }catch{}
                       }}>Grant</Button>
                       <Button size="sm" variant="outline" onClick={async ()=>{
                         try{
-                          await fetch(`${location.origin.replace(/:\\d+$/,':5000')}/api/auth/admin-respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:selected?.meta?.requestId, action:'decline', adminId: user?.id||'ADMIN'})});
+await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:selected?.meta?.requestId, action:'decline', adminId: user?.id||'ADMIN'})});
                           setOverlayOpen(false);
                         }catch{}
                       }}>Decline</Button>

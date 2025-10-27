@@ -8,6 +8,8 @@ import time
 import uuid
 import requests
 import bleach
+import threading
+import json as pyjson
 from flask_socketio import SocketIO, emit, join_room, leave_room
 
 app = Flask(__name__)
@@ -21,6 +23,43 @@ socketio = SocketIO(app, cors_allowed_origins=list(ALLOWED_ORIGINS) or "*")
 # In-memory stores (dev only)
 NOTIFICATIONS = {}  # user_id -> list[notification]
 PASSWORD_RESET_REQUESTS = {}  # req_id -> record
+
+# Lightweight file-backed DB (dev)
+DB_PATH = os.path.join(os.path.dirname(__file__), 'data.json')
+DB_LOCK = threading.Lock()
+DEFAULT_DB = {
+    "users": {},          # id -> user dict
+    "activity": [],       # list of activity records
+    "books": [],          # optional for reports
+    "borrows": []         # optional for reports
+}
+
+def load_db():
+    with DB_LOCK:
+        try:
+            if not os.path.exists(DB_PATH):
+                with open(DB_PATH, 'w', encoding='utf-8') as f:
+                    pyjson.dump(DEFAULT_DB, f)
+            with open(DB_PATH, 'r', encoding='utf-8') as f:
+                return pyjson.load(f)
+        except Exception:
+            return DEFAULT_DB.copy()
+
+def save_db(db):
+    with DB_LOCK:
+        try:
+            with open(DB_PATH, 'w', encoding='utf-8') as f:
+                pyjson.dump(db, f)
+        except Exception:
+            pass
+
+def log_activity(user_id: str, action: str, details: str = ""):
+    db = load_db()
+    rec = {"id": f"ACT-{int(time.time()*1000)}", "userId": user_id, "action": action, "details": details, "timestamp": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}
+    db.setdefault("activity", []).append(rec)
+    db["activity"] = db["activity"][-1000:]
+    save_db(db)
+    _emit('activity.new', user_id, rec)
 
 
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
@@ -54,6 +93,99 @@ def root():
 @app.route('/health')
 def health():
     return jsonify(status='ok')
+
+# ---------- Users/Profile API ----------
+@app.route('/api/users')
+def list_users():
+    db = load_db()
+    users = list((db.get("users") or {}).values())
+    return jsonify(items=users)
+
+@app.route('/api/users/<uid>')
+def get_user(uid: str):
+    db = load_db()
+    u = db.get("users", {}).get(uid)
+    if not u:
+        # fallback: build from session/request data if missing
+        u = {"id": uid}
+    return jsonify(u)
+
+@app.route('/api/users/<uid>', methods=['PATCH'])
+def update_user(uid: str):
+    db = load_db()
+    body = request.get_json(force=True)
+    users = db.setdefault("users", {})
+    cur = users.get(uid, {"id": uid})
+    cur.update(body or {})
+    users[uid] = cur
+    save_db(db)
+    log_activity(uid, 'profile_update')
+    _emit('user.updated', uid, cur)
+    return jsonify(ok=True, user=cur)
+
+@app.route('/api/users/<uid>/2fa', methods=['POST'])
+def toggle_2fa(uid: str):
+    db = load_db()
+    body = request.get_json(force=True)
+    enabled = bool(body.get('enabled'))
+    users = db.setdefault("users", {})
+    cur = users.get(uid, {"id": uid})
+    cur['twoFactorEnabled'] = enabled
+    if enabled and body.get('secret'):
+        cur['twoFactorKey'] = body.get('secret')
+    users[uid] = cur
+    save_db(db)
+    log_activity(uid, '2fa_enable' if enabled else '2fa_disable')
+    _emit('user.2fa', uid, {"enabled": enabled})
+    return jsonify(ok=True, user=cur)
+
+# Activity feed
+@app.route('/api/activity', methods=['GET'])
+def list_activity():
+    uid = request.args.get('userId')
+    db = load_db()
+    arr = db.get('activity', [])
+    if uid:
+        arr = [a for a in arr if a.get('userId') == uid]
+    arr = sorted(arr, key=lambda a: a.get('timestamp',''), reverse=True)
+    return jsonify(items=arr[:200])
+
+@app.route('/api/activity', methods=['POST'])
+def add_activity():
+    try:
+        body = request.get_json(force=True) or {}
+    except Exception:
+        body = {}
+    uid = (body or {}).get('userId') or _get_user_id()
+    action = (body or {}).get('action') or 'event'
+    details = (body or {}).get('details') or ''
+    log_activity(uid, action, details)
+    return jsonify(ok=True)
+
+# Reports endpoints (derived from file-backed data)
+@app.route('/api/reports/top-borrowed')
+def api_top_borrowed():
+    db = load_db()
+    counts = {}
+    for b in db.get('borrows', []):
+        title = b.get('bookTitle') or b.get('bookId')
+        if not title: 
+            continue
+        counts[title] = counts.get(title, 0) + 1
+    top = sorted(({"title": k, "borrows": v} for k,v in counts.items()), key=lambda x: x['borrows'], reverse=True)[:5]
+    return jsonify(items=top)
+
+@app.route('/api/reports/category-dist')
+def api_category_dist():
+    db = load_db()
+    counts = {}
+    books = db.get('books', [])
+    for b in books:
+        cat = (b.get('category') or 'Uncategorized')
+        counts[cat] = counts.get(cat, 0) + 1
+    total = len(books) or 1
+    dist = [{"category": k, "percentage": round((v/total)*100)} for k,v in counts.items()]
+    return jsonify(items=dist)
 
 # ---------- Socket.IO ----------
 @socketio.on('connect')

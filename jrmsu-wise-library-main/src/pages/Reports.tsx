@@ -58,20 +58,37 @@ const Reports = () => {
     StatsService.start(3000);
     return unsub;
   }, []);
-  const topBorrowed = useMemo(() => {
-    const counts: Record<string, number> = {};
-    BorrowService.list().forEach(b => { counts[b.bookTitle] = (counts[b.bookTitle]||0)+1; });
-    return Object.entries(counts)
-      .map(([title, borrows]) => ({ title, borrows }))
-      .sort((a,b)=> b.borrows - a.borrows)
-      .slice(0,5);
-  }, [tick]);
-  const categoryDist = useMemo(() => {
-    const counts: Record<string, number> = {};
-    const books = BooksService.list();
-    books.forEach(b => { counts[b.category] = (counts[b.category]||0)+1; });
-    const total = books.length || 1;
-    return Object.entries(counts).map(([category, count]) => ({ category, percentage: Math.round((count/total)*100) }));
+  const [topBorrowed, setTopBorrowed] = useState<{ title: string; borrows: number }[]>([]);
+  const [categoryDist, setCategoryDist] = useState<{ category: string; percentage: number }[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const [tb, cd] = await Promise.all([
+          fetch('http://localhost:5000/api/reports/top-borrowed').then(r=>r.json()).catch(()=>null),
+          fetch('http://localhost:5000/api/reports/category-dist').then(r=>r.json()).catch(()=>null),
+        ]);
+        if (!alive) return;
+        if (tb?.items) setTopBorrowed(tb.items);
+        if (cd?.items) setCategoryDist(cd.items);
+        if ((!tb?.items || !cd?.items)) {
+          // Fallback to client-side computation
+          const counts: Record<string, number> = {};
+          BorrowService.list().forEach(b => { counts[b.bookTitle] = (counts[b.bookTitle]||0)+1; });
+          const tbLocal = Object.entries(counts).map(([title, borrows]) => ({ title, borrows })).sort((a,b)=> b.borrows - a.borrows).slice(0,5);
+          setTopBorrowed(tbLocal);
+          const counts2: Record<string, number> = {};
+          const books = BooksService.list();
+          books.forEach(b => { counts2[b.category] = (counts2[b.category]||0)+1; });
+          const total = books.length || 1;
+          const cdLocal = Object.entries(counts2).map(([category, count]) => ({ category, percentage: Math.round((count/total)*100) }));
+          setCategoryDist(cdLocal);
+        }
+      } catch {}
+    };
+    load();
+    const t = setInterval(load, 5000);
+    return () => { alive = false; clearInterval(t); };
   }, [tick]);
 
   return (

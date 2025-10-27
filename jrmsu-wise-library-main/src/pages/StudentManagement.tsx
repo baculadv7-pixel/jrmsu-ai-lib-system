@@ -31,9 +31,26 @@ const StudentManagement = () => {
   const [filterYear, setFilterYear] = useState<string>("all");
   const [filterSection, setFilterSection] = useState<string>("all");
 
-  // Load students from database
+  // Load students from database and backend
   useEffect(() => {
     loadStudents();
+    let t: any = null;
+    const tick = async () => {
+      try {
+        const mod = await import('@/services/pythonApi');
+        const res: any = await (mod as any).pythonApi.listUsers();
+        const items = (res?.items || []) as any[];
+        const students = items.filter(u => (u.userType === 'student')) as User[];
+        if (students?.length) setStudents(prev => {
+          const map = new Map<string, User>();
+          [...prev, ...students].forEach(u => map.set(u.id, { ...(map.get(u.id) as any), ...u } as User));
+          return Array.from(map.values());
+        });
+      } catch {}
+    };
+    tick();
+    t = setInterval(tick, 5000);
+    return () => { if (t) clearInterval(t); };
   }, []);
 
   // Get unique filter values

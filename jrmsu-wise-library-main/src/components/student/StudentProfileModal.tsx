@@ -33,6 +33,10 @@ import { useToast } from "@/hooks/use-toast";
 import { databaseService, User } from "@/services/database";
 import { qrCodeService } from "@/services/qrcode";
 import { QRCodeSVG } from "qrcode.react";
+import Admin2FAOverlay from "@/components/settings/Admin2FAOverlay";
+import { ActivityService } from "@/services/activity";
+import { NotificationsService } from "@/services/notifications";
+import { Eye, EyeOff } from "lucide-react";
 
 interface StudentProfileModalProps {
   isOpen: boolean;
@@ -49,6 +53,12 @@ export function StudentProfileModal({ isOpen, onClose, student, onSave }: Studen
   const [editedStudent, setEditedStudent] = useState<User>(student);
   const [profileImage, setProfileImage] = useState<string | null>(student.profilePicture || null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [open2FA, setOpen2FA] = useState(false);
+  const [showPwReset, setShowPwReset] = useState(false);
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [show1, setShow1] = useState(false);
+  const [show2, setShow2] = useState(false);
 
   // Profile picture upload handler
   const handleImageUpload = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -221,6 +231,18 @@ export function StudentProfileModal({ isOpen, onClose, student, onSave }: Studen
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
+      <Admin2FAOverlay
+        isOpen={open2FA}
+        onClose={() => setOpen2FA(false)}
+        userId={student.id}
+        userName={student.fullName}
+        userEmail={student.email}
+        onEnabledChange={(enabled)=>{
+          setEditedStudent(prev=>({ ...prev, twoFactorEnabled: enabled }));
+          try { ActivityService.log(student.id, enabled ? '2fa_enable' : '2fa_disable'); } catch {}
+          try { NotificationsService.add({ receiverId: student.id, type: 'system', message: enabled ? '2FA enabled by admin.' : '2FA disabled by admin.' }); } catch {}
+        }}
+      />
       <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
           <DialogTitle className="text-2xl font-bold text-primary">
@@ -357,6 +379,20 @@ export function StudentProfileModal({ isOpen, onClose, student, onSave }: Studen
                 <p className="text-xs text-center text-muted-foreground">
                   Use this QR code for quick library access.
                 </p>
+              </CardContent>
+            </Card>
+
+            {/* Admin 2FA Toggle */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Lock className="h-5 w-5" />
+                  Two-Factor Authentication
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                <Button variant="outline" onClick={() => setOpen2FA(true)} className="w-full">Enable 2FA</Button>
+                <p className="text-xs text-muted-foreground">Opens Authentication & 2FA overlay for this student</p>
               </CardContent>
             </Card>
           </div>
@@ -524,6 +560,51 @@ export function StudentProfileModal({ isOpen, onClose, student, onSave }: Studen
                     </p>
                   )}
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Account Security - Admin Reset */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Lock className="h-5 w-5" />
+                  Account Security
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {!showPwReset ? (
+                  <Button variant="outline" onClick={() => setShowPwReset(true)} className="w-full">Reset Password</Button>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="relative">
+                      <Label>New Password</Label>
+                      <Input type={show1 ? 'text' : 'password'} value={pw1} onChange={(e)=>setPw1(e.target.value)} placeholder="Enter new password" />
+                      <button type="button" className="absolute right-3 bottom-2 text-muted-foreground" onClick={()=>setShow1(!show1)}>{show1 ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}</button>
+                    </div>
+                    <div className="relative">
+                      <Label>Confirm Password</Label>
+                      <Input type={show2 ? 'text' : 'password'} value={pw2} onChange={(e)=>setPw2(e.target.value)} placeholder="Re-enter new password" />
+                      <button type="button" className="absolute right-3 bottom-2 text-muted-foreground" onClick={()=>setShow2(!show2)}>{show2 ? <EyeOff className="h-4 w-4"/> : <Eye className="h-4 w-4"/>}</button>
+                    </div>
+                    <Button
+                      onClick={()=>{
+                        if (pw1.length < 8 || pw1 !== pw2) { toast({ title: 'Check password inputs', variant: 'destructive' }); return; }
+                        const res = databaseService.setUserPassword(student.id, pw1);
+                        if (res.success) {
+                          toast({ title: 'Password changes completed!' });
+                          ActivityService.log(student.id, 'password_change');
+                          NotificationsService.add({ receiverId: student.id, type: 'system', message: 'Password reset by admin.' });
+                          setShowPwReset(false); setPw1(''); setPw2('');
+                        } else {
+                          toast({ title: 'Reset failed', description: res.error, variant: 'destructive' });
+                        }
+                      }}
+                      className="w-full"
+                    >
+                      Confirm
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

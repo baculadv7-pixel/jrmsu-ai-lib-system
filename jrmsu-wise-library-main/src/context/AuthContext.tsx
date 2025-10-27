@@ -115,6 +115,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
     setUser(session);
+    // Hydrate with backend profile for complete data
+    try {
+      const r = await fetch('http://localhost:5000/api/users/' + encodeURIComponent(dbUser.id));
+      if (r.ok) {
+        const backendUser = await r.json();
+        const merged = { ...session, ...backendUser };
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(merged));
+        setUser(merged);
+      }
+    } catch {}
 
     try { ActivityService.log(dbUser.id, 'login'); } catch { /* noop */ }
     console.log(`✅ User authenticated via manual login: ${dbUser.fullName} (${dbUser.id})`);
@@ -181,6 +191,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
     setUser(session);
+    try {
+      const r = await fetch('http://localhost:5000/api/users/' + encodeURIComponent(dbUser.id));
+      if (r.ok) {
+        const backendUser = await r.json();
+        const merged = { ...session, ...backendUser };
+        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(merged));
+        setUser(merged);
+      }
+    } catch {}
 
     try { ActivityService.log(dbUser.id, 'login', 'QR'); } catch { /* noop */ }
     console.log(`✅ User authenticated successfully via QR login: ${dbUser.fullName} (${dbUser.id})`);
@@ -192,6 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const normalized = (authKey || '').toString().replace(/\s+/g, '').toUpperCase();
     // Persist to database for accuracy across sessions
     const dbUpdate = databaseService.updateUser(user.id, { twoFactorEnabled: true, twoFactorKey: normalized });
+    try { fetch('http://localhost:5000/api/users/' + encodeURIComponent(user.id) + '/2fa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: true, secret: normalized }) }); } catch {}
     const persisted = dbUpdate.success && dbUpdate.user ? dbUpdate.user : { ...user, twoFactorEnabled: true, twoFactorKey: normalized };
     const updated: AuthUser = { ...persisted, role: (persisted.userType as UserRole), authKey: persisted.twoFactorKey };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
@@ -203,6 +223,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     // Persist to database for accuracy across sessions
     const dbUpdate = databaseService.updateUser(user.id, { twoFactorEnabled: false, twoFactorKey: undefined });
+    try { fetch('http://localhost:5000/api/users/' + encodeURIComponent(user.id) + '/2fa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled: false }) }); } catch {}
     const persisted = dbUpdate.success && dbUpdate.user ? dbUpdate.user : { ...user, twoFactorEnabled: false, twoFactorKey: undefined } as any;
     const updated: AuthUser = { ...persisted, role: (persisted.userType as UserRole), authKey: undefined };
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(updated));
