@@ -68,9 +68,13 @@ const RegistrationPersonal = () => {
   const zipOk = useMemo(() => /^\d{4}$/.test(data.addressZip || ""), [data.addressZip]);
   const barangayOk = Boolean(data.addressBarangay?.trim());
   const permanentAddressOk = Boolean(data.addressPermanent?.trim());
+  const ageOk = useMemo(() => {
+    const age = parseInt(data.age || "");
+    return !isNaN(age) && age >= 16 && age <= 100;
+  }, [data.age]);
 
   // All required fields validation (Note: Barangay is now required as manual input)
-  const allValid = firstNameOk && middleNameOk && lastNameOk && birthdateOk && genderOk && 
+  const allValid = firstNameOk && middleNameOk && lastNameOk && ageOk && birthdateOk && genderOk && 
     emailOk && phoneOk && regionOk && provinceOk && municipalityOk && barangayOk && 
     countryOk && zipOk && permanentAddressOk;
 
@@ -185,7 +189,38 @@ const RegistrationPersonal = () => {
           </div>
 
           {/* Personal Details Section */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="age">Age *</Label>
+              <div className="flex gap-2">
+                <Input 
+                  id="age" 
+                  type="number"
+                  min="16"
+                  max="100"
+                  placeholder="Age"
+                  value={data.age || ""} 
+                  onChange={(e) => update({ age: e.target.value })}
+                  className={data.age && (parseInt(data.age) < 16 || parseInt(data.age) > 100) && showErrors ? "border-destructive" : undefined}
+                />
+                <Select 
+                  value={data.age || ""} 
+                  onValueChange={(value) => update({ age: value })}
+                >
+                  <SelectTrigger className="w-20">
+                    <SelectValue placeholder="Age" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-48">
+                    {Array.from({length: 85}, (_, i) => i + 16).map(age => (
+                      <SelectItem key={age} value={age.toString()}>{age}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {data.age && (parseInt(data.age) < 16 || parseInt(data.age) > 100) && showErrors && (
+                <p className="text-xs text-destructive">⚠ Age must be between 16-100 years.</p>
+              )}
+            </div>
             <div className="space-y-2">
               <Label htmlFor="birthdate">Birthdate * (MM/DD/YYYY)</Label>
               <Input 
@@ -471,32 +506,123 @@ const RegistrationPersonal = () => {
           </div>
 
           {/* Permanent Address Section */}
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="permanentAddress">Permanent Address *</Label>
-              <Input 
-                id="permanentAddress" 
-                value={data.addressPermanent || ""} 
-                onChange={(e) => update({ addressPermanent: e.target.value })}
-                disabled={sameAsCurrent}
-                className={!permanentAddressOk && showErrors ? "border-destructive" : undefined}
-              />
-              {!permanentAddressOk && showErrors && (
-                <p className="text-xs text-destructive">⚠️ Please enter your permanent address.</p>
-              )}
-            </div>
-            
+          <div className="space-y-6">
             <div className="flex items-center space-x-2">
               <Checkbox 
                 id="sameAsCurrent" 
                 checked={sameAsCurrent}
-                onCheckedChange={setSameAsCurrent}
+                onCheckedChange={(checked) => {
+                  setSameAsCurrent(checked as boolean);
+                  if (checked) {
+                    // Auto-fill permanent address with current address
+                    const currentAddr = [data.addressStreet, data.addressBarangay, data.addressMunicipality, 
+                      data.addressProvince, data.addressRegion, data.addressCountry, data.addressZip]
+                      .filter(Boolean)
+                      .join(", ");
+                    update({ addressPermanent: currentAddr });
+                  }
+                }}
               />
               <Label htmlFor="sameAsCurrent" className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
                 Same as Current Address
               </Label>
             </div>
 
+            {/* Permanent Address Input */}
+            <div className="space-y-2">
+              <Label htmlFor="permanentAddress">Permanent Address *</Label>
+              <div className={sameAsCurrent ? "opacity-50" : ""}>
+                {sameAsCurrent ? (
+                  <Input 
+                    id="permanentAddress" 
+                    value={data.addressPermanent || ""} 
+                    disabled
+                    className="bg-muted/50 text-muted-foreground"
+                  />
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 space-y-0">
+                    <div className="space-y-1">
+                      <Label className="text-xs">Region *</Label>
+                      <Input 
+                        placeholder="Region"
+                        value={data.permanentAddressRegion || ""} 
+                        onChange={(e) => update({ permanentAddressRegion: e.target.value })}
+                        className="text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Province *</Label>
+                      <Input 
+                        placeholder="Province"
+                        value={data.permanentAddressProvince || ""} 
+                        onChange={(e) => update({ permanentAddressProvince: e.target.value })}
+                        className="text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Municipality/City *</Label>
+                      <Input 
+                        placeholder="Municipality/City"
+                        value={data.permanentAddressMunicipality || ""} 
+                        onChange={(e) => update({ permanentAddressMunicipality: e.target.value })}
+                        className="text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Country</Label>
+                      <Input 
+                        value="Philippines" 
+                        disabled
+                        className="bg-muted/50 text-muted-foreground text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Barangay *</Label>
+                      <Input 
+                        placeholder="Barangay"
+                        value={data.permanentAddressBarangay || ""} 
+                        onChange={(e) => update({ permanentAddressBarangay: e.target.value })}
+                        className="text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Street (Optional)</Label>
+                      <Input 
+                        placeholder="Street"
+                        value={data.permanentAddressStreet || ""} 
+                        onChange={(e) => update({ permanentAddressStreet: e.target.value })}
+                        className="text-sm"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs">Zip Code *</Label>
+                      <Input 
+                        placeholder="Zip Code"
+                        value={data.permanentAddressZip || ""} 
+                        onChange={(e) => update({ permanentAddressZip: e.target.value.replace(/\D/g, "").slice(0, 4) })}
+                        className="text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              {!sameAsCurrent && (
+                <div className="space-y-2 mt-3">
+                  <Label htmlFor="permanentAddressText">Complete Permanent Address *</Label>
+                  <Input 
+                    id="permanentAddressText" 
+                    placeholder="Complete permanent address (will auto-populate from fields above)"
+                    value={data.addressPermanent || ""} 
+                    onChange={(e) => update({ addressPermanent: e.target.value })}
+                    className={!permanentAddressOk && showErrors ? "border-destructive" : undefined}
+                  />
+                </div>
+              )}
+              {!permanentAddressOk && showErrors && (
+                <p className="text-xs text-destructive">⚠️ Please enter your permanent address.</p>
+              )}
+            </div>
+            
             <div className="space-y-2">
               <Label htmlFor="landmark">Landmark / Notes</Label>
               <Input 
@@ -505,6 +631,7 @@ const RegistrationPersonal = () => {
                 value={data.addressPermanentNotes || ""} 
                 onChange={(e) => update({ addressPermanentNotes: e.target.value })}
               />
+              <p className="text-xs text-muted-foreground">Optional</p>
             </div>
           </div>
 

@@ -10,30 +10,46 @@ export interface RegistrationData {
   lastName: string;
   suffix?: string;
   birthdate: string;
-  age: string;
+  age: string; // Age as input/dropdown
   gender?: string;
   email: string;
   phone: string;
-  // Address (current)
+  
+  // Current Address (all required except street)
   addressStreet?: string;
   addressBarangay?: string;
   addressMunicipality?: string;
   addressProvince?: string;
+  addressRegion?: string; // Added region field
   addressCountry?: string;
   addressZip?: string;
+  
   // Permanent address and notes
   address: string;
   addressPermanent?: string;
-  addressPermanentNotes?: string;
+  sameAsCurrent?: boolean; // Checkbox for "Same as Current Address"
+  addressPermanentNotes?: string; // Landmark/Notes field
+  
+  // Permanent address fields (when not same as current)
+  permanentAddressStreet?: string;
+  permanentAddressBarangay?: string;
+  permanentAddressMunicipality?: string;
+  permanentAddressProvince?: string;
+  permanentAddressRegion?: string;
+  permanentAddressCountry?: string;
+  permanentAddressZip?: string;
+  
   // Institutional (student)
   department?: string;
   course?: string;
   yearLevel?: string;
   block?: string;
   studentId?: string;
+  
   // Institutional (admin)
   adminId?: string;
   position?: string;
+  
   // Security
   password?: string;
   confirmPassword?: string;
@@ -62,9 +78,20 @@ const defaultData: RegistrationData = {
   addressBarangay: "",
   addressMunicipality: "",
   addressProvince: "",
-  addressCountry: "",
+  addressRegion: "",
+  addressCountry: "Philippines",
   addressZip: "",
   address: "",
+  addressPermanent: "",
+  sameAsCurrent: false,
+  addressPermanentNotes: "",
+  permanentAddressStreet: "",
+  permanentAddressBarangay: "",
+  permanentAddressMunicipality: "",
+  permanentAddressProvince: "",
+  permanentAddressRegion: "",
+  permanentAddressCountry: "Philippines",
+  permanentAddressZip: "",
 };
 
 export function RegistrationProvider({ children }: { children: React.ReactNode }) {

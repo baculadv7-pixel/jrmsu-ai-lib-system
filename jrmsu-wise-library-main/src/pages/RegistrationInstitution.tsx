@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { useRegistration } from "@/context/RegistrationContext";
 import { useState, useMemo } from "react";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
+import { studentApiService } from "@/services/studentApi";
 
 const RegistrationInstitution = () => {
   const navigate = useNavigate();
@@ -48,21 +49,35 @@ const RegistrationInstitution = () => {
         <CardContent>
           {isStudent ? (
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="space-y-2 md:col-span-2">
+                <div className="space-y-2 md:col-span-2">
                 <Label htmlFor="sid">Student ID *</Label>
                 <Input
                   id="sid"
-                  placeholder="KC-23-A-00243"
+                  placeholder="KC-23-A-00762"
                   value={data.studentId || "KC-"}
-                  onChange={(e) => update({ studentId: sanitize(e.target.value) })}
+                  onChange={(e) => {
+                    const value = sanitize(e.target.value);
+                    // Ensure it always starts with KC-
+                    const formattedValue = value.startsWith('KC-') ? value : 'KC-' + value.replace(/^KC-?/, '');
+                    update({ studentId: formattedValue });
+                    
+                    // Extract block automatically when Student ID is complete
+                    const validation = studentApiService.validateStudentId(formattedValue);
+                    if (validation.isValid && validation.block) {
+                      update({ block: validation.block });
+                    }
+                  }}
                   onBlur={() => setSidTouched(true)}
-                  className={(data.studentId && !/^KC-\d{2}-[A-D]-\d{5}$/.test(data.studentId) && (sidTouched || trailingDigitsCount(data.studentId) >= 5)) ? "border-destructive" : undefined}
+                  className={(data.studentId && !/^KC-\d{2}-[A-F]-\d{5}$/.test(data.studentId) && (sidTouched || trailingDigitsCount(data.studentId) >= 5)) ? "border-destructive" : undefined}
                   aria-describedby="sid-help sid-error"
                 />
-                {data.studentId && !/^KC-\d{2}-[A-D]-\d{5}$/.test(data.studentId) && (sidTouched || trailingDigitsCount(data.studentId) >= 5) && (
-                  <p id="sid-error" className="text-xs text-destructive">⚠ Invalid ID format.</p>
+                {data.studentId && !/^KC-\d{2}-[A-F]-\d{5}$/.test(data.studentId) && (sidTouched || trailingDigitsCount(data.studentId) >= 5) && (
+                  <p id="sid-error" className="text-xs text-destructive">⚠ Invalid ID format. Use KC-23-A-00762 format.</p>
                 )}
-                <p id="sid-help" className="text-xs text-muted-foreground">Student ID format: KC-23-A-00243</p>
+                <p id="sid-help" className="text-xs text-muted-foreground">Student ID format: KC-23-A-00762 (KATIPUNAN CAMPUS-SCHOOLYEAR-BLOCK-STUDENT ID)</p>
+                {data.studentId && studentApiService.validateStudentId(data.studentId).isValid && (
+                  <p className="text-xs text-green-600">✓ Block extracted: {studentApiService.extractBlockFromStudentId(data.studentId)}</p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="dept">College Department *</Label>
@@ -152,14 +167,21 @@ const RegistrationInstitution = () => {
                   <Input
                     id="aid"
                     placeholder="KCL-00045"
-                    value={data.adminId || ""}
-                    onChange={(e) => update({ adminId: sanitize(e.target.value) })}
+                    value={data.adminId || "KCL-"}
+                    onChange={(e) => {
+                      let value = e.target.value;
+                      // Ensure it always starts with KCL-
+                      if (!value.startsWith('KCL-')) {
+                        value = 'KCL-' + value.replace(/^KCL-?/, '');
+                      }
+                      update({ adminId: sanitize(value) });
+                    }}
                     onBlur={() => setAidTouched(true)}
                     className={(data.adminId && !/^KCL-\d{5}$/.test(data.adminId) && (aidTouched || trailingDigitsCount(data.adminId) >= 5)) ? "border-destructive" : undefined}
                     aria-describedby="aid-help aid-error"
                   />
                   {data.adminId && !/^KCL-\d{5}$/.test(data.adminId) && (aidTouched || trailingDigitsCount(data.adminId) >= 5) && (
-                    <p id="aid-error" className="text-xs text-destructive">⚠ Invalid ID format.</p>
+                    <p id="aid-error" className="text-xs text-destructive">⚠ Invalid ID format. Use KCL-00045 format.</p>
                   )}
                   <p id="aid-help" className="text-xs text-muted-foreground">Admin ID format: KCL-00045 (Katipunan Campus Library)</p>
                 </div>

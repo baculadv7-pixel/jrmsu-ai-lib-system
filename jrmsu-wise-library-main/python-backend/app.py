@@ -110,6 +110,425 @@ def get_user(uid: str):
         u = {"id": uid}
     return jsonify(u)
 
+# ---------- Admin-specific API (maps to users with userType == 'admin') ----------
+
+def _ensure_users():
+    db = load_db()
+    db.setdefault("users", {})
+    return db
+
+@app.route('/api/admins', methods=['GET'])
+def admins_list():
+    db = load_db()
+    users = list((db.get('users') or {}).values())
+    admins = [u for u in users if (u.get('userType') == 'admin' or (u.get('role') == 'admin'))]
+    return jsonify(items=admins)
+
+@app.route('/api/admins/<admin_id>', methods=['GET'])
+def admins_get(admin_id: str):
+    db = load_db()
+    u = (db.get('users') or {}).get(admin_id)
+    if not u or (u.get('userType') != 'admin' and u.get('role') != 'admin'):
+        return jsonify(error='Admin not found'), 404
+    return jsonify(u)
+
+@app.route('/api/admins/<admin_id>', methods=['PUT'])
+def admins_put(admin_id: str):
+    db = _ensure_users()
+    body = request.get_json(force=True) or {}
+    u = (db.get('users') or {}).get(admin_id)
+    if not u:
+        return jsonify(error='Admin not found'), 404
+    # Do not allow changing admin_id
+    body.pop('id', None)
+    body.pop('admin_id', None)
+    # Merge fields
+    u.update(body)
+    # Normalize address composition if parts provided
+    parts = [u.get('street'), u.get('barangay'), u.get('municipality'), u.get('province'), u.get('country'), u.get('zipCode')]
+    if any(parts):
+        u['address'] = ', '.join([p for p in parts if p])
+    db['users'][admin_id] = u
+    save_db(db)
+    log_activity(admin_id, 'profile_update')
+    _emit('admins.updated', admin_id, u)
+    return jsonify(ok=True, admin=u)
+
+@app.route('/api/admins/register', methods=['POST'])
+def admins_register():
+    body = request.get_json(force=True) or {}
+    admin_id = (body.get('adminId') or body.get('admin_id') or body.get('id') or '').strip() or f"KCL-{int(time.time())%100000:05d}"
+    first = (body.get('firstName') or '').strip()
+    middle = (body.get('middleName') or '').strip()
+    last = (body.get('lastName') or '').strip()
+    full = ' '.join([x for x in [first, middle, last] if x]).strip()
+    email = (body.get('email') or '').strip().lower()
+    phone = (body.get('phone') or '').strip()
+    position = (body.get('position') or body.get('role') or 'admin').strip()
+    gender = (body.get('gender') or '').strip()
+    birthday = (body.get('birthdate') or body.get('birthday') or '').strip()
+    age = body.get('age') or ''
+    # Address fields
+    street = body.get('street') or ''
+    barangay = body.get('barangay') or ''
+    municipality = body.get('municipality') or body.get('city') or ''
+    province = body.get('province') or ''
+    region = body.get('region') or ''
+    zip_code = body.get('zipCode') or body.get('zipcode') or ''
+    country = body.get('country') or 'Philippines'
+    address = ', '.join([p for p in [street, barangay, municipality, province, country, zip_code] if p])
+
+    db = _ensure_users()
+    if admin_id in db['users']:
+        return jsonify(error='Admin ID already exists'), 400
+    admin = {
+        'id': admin_id,
+        'adminId': admin_id,
+        'userType': 'admin',
+        'role': position,
+        'position': position,
+        'firstName': first,
+        'middleName': middle,
+        'lastName': last,
+        'fullName': full,
+        'email': email,
+        'phone': phone,
+        'gender': gender,
+        'birthday': birthday,
+        'age': age,
+        'street': street,
+        'barangay': barangay,
+        'municipality': municipality,
+        'province': province,
+        'region': region,
+        'zipCode': zip_code,
+        'country': country,
+        'address': address,
+        'twoFactorEnabled': False,
+        'createdAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'systemTag': 'JRMSU-KCL',
+    }
+    db['users'][admin_id] = admin
+    save_db(db)
+    log_activity(admin_id, 'admin_register')
+    _emit('admins.updated', admin_id, admin)
+    return jsonify(ok=True, admin=admin)
+
+@app.route('/api/admins/<admin_id>/2fa/setup', methods=['POST'])
+def admins_2fa_setup(admin_id: str):
+    # Delegate to 2FA generator, but store secret on admin
+    r = twofa_generate()
+    data = r.get_json()
+    db = _ensure_users()
+    u = (db.get('users') or {}).get(admin_id)
+    if not u:
+        return jsonify(error='Admin not found'), 404
+    u['twoFactorSetupKey'] = data.get('secret')
+    db['users'][admin_id] = u
+    save_db(db)
+    return jsonify(secret=data.get('secret'), otpauth=data.get('otpauth'), currentCode=data.get('currentCode'))
+
+@app.route('/api/admins/<admin_id>/2fa/verify', methods=['POST'])
+def admins_2fa_verify(admin_id: str):
+    body = request.get_json(force=True) or {}
+    secret = (body.get('secret') or '').strip()
+    token = (body.get('token') or body.get('totpCode') or '').strip()
+    ok = verify_totp_code(secret, token, window=1)
+    if not ok:
+        return jsonify(valid=False), 400
+    db = _ensure_users()
+    u = (db.get('users') or {}).get(admin_id)
+    if not u:
+        return jsonify(error='Admin not found'), 404
+    u['twoFactorEnabled'] = True
+    u['twoFactorKey'] = secret
+    db['users'][admin_id] = u
+    save_db(db)
+    log_activity(admin_id, '2fa_enable')
+    _emit('admins.updated', admin_id, {'twoFactorEnabled': True})
+    return jsonify(valid=True)
+
+@app.route('/api/admins/<admin_id>/2fa/disable', methods=['POST'])
+def admins_2fa_disable(admin_id: str):
+    db = _ensure_users()
+    u = (db.get('users') or {}).get(admin_id)
+    if not u:
+        return jsonify(error='Admin not found'), 404
+    u['twoFactorEnabled'] = False
+    u.pop('twoFactorKey', None)
+    db['users'][admin_id] = u
+    save_db(db)
+    log_activity(admin_id, '2fa_disable')
+    _emit('admins.updated', admin_id, {'twoFactorEnabled': False})
+    return jsonify(ok=True)
+
+# ---------- Student-specific API (maps to users with userType == 'student') ----------
+
+@app.route('/api/students', methods=['GET'])
+def students_list():
+    db = load_db()
+    users = list((db.get('users') or {}).values())
+    students = [u for u in users if (u.get('userType') == 'student' or (u.get('role') == 'student'))]
+    return jsonify(items=students)
+
+@app.route('/api/students/<student_id>', methods=['GET'])
+def students_get(student_id: str):
+    db = load_db()
+    u = (db.get('users') or {}).get(student_id)
+    if not u or (u.get('userType') != 'student' and u.get('role') != 'student'):
+        return jsonify(error='Student not found'), 404
+    return jsonify(u)
+
+@app.route('/api/students/<student_id>', methods=['PUT'])
+def students_put(student_id: str):
+    db = _ensure_users()
+    body = request.get_json(force=True) or {}
+    u = (db.get('users') or {}).get(student_id)
+    if not u:
+        return jsonify(error='Student not found'), 404
+    # read-only id
+    body.pop('id', None)
+    body.pop('student_id', None)
+    # Only allow editable student fields (academic + current address + contact)
+    allowed = {
+        'college_department','department','course_major','course','year_level','year','block',
+        'current_address','address','phone','street','barangay','municipality','province','region','zipCode','country'
+    }
+    for k,v in list(body.items()):
+        if k not in allowed:
+            body.pop(k, None)
+    u.update(body)
+    # Normalize block from studentId format if present
+    sid = u.get('id') or u.get('studentId')
+    if sid and '-' in sid:
+        try:
+            # KC-23-A-00762 => block at index 2
+            blk = sid.split('-')[2]
+            u['block'] = u.get('block') or blk
+        except Exception:
+            pass
+    parts = [u.get('street'), u.get('barangay'), u.get('municipality'), u.get('province'), u.get('country') or 'Philippines', u.get('zipCode')]
+    if any(parts):
+        u['address'] = ', '.join([p for p in parts if p])
+    db['users'][student_id] = u
+    save_db(db)
+    log_activity(student_id, 'profile_update')
+    _emit('students.updated', student_id, u)
+    return jsonify(ok=True, student=u)
+
+@app.route('/api/students/register', methods=['POST'])
+def students_register():
+    body = request.get_json(force=True) or {}
+    student_id = (body.get('studentId') or body.get('id') or '').strip()
+    if not student_id:
+        return jsonify(error='Student ID required'), 400
+    
+    # Extract block from student ID (KC-23-A-00762 => A)
+    extracted_block = ''
+    if '-' in student_id:
+        try:
+            parts = student_id.split('-')
+            if len(parts) >= 3:
+                extracted_block = parts[2]
+        except Exception:
+            pass
+    
+    # Personal Information
+    first = (body.get('firstName') or '').strip()
+    middle = (body.get('middleName') or '').strip()
+    last = (body.get('lastName') or '').strip()
+    suffix = (body.get('suffix') or '').strip()
+    full = ' '.join([x for x in [first, middle, last, suffix] if x]).strip()
+    email = (body.get('email') or '').strip().lower()
+    phone = (body.get('phone') or '').strip()
+    gender = (body.get('gender') or '').strip()
+    birthday = (body.get('birthdate') or body.get('birthday') or '').strip()
+    age = body.get('age') or ''
+    
+    # Academic Information
+    department = body.get('department') or body.get('college_department') or ''
+    course = body.get('course') or body.get('course_major') or ''
+    year = body.get('year') or body.get('year_level') or body.get('yearLevel') or ''
+    block = body.get('block') or extracted_block
+    
+    # Current Address (where student currently lives)
+    current_street = body.get('addressStreet') or body.get('currentAddressStreet') or ''
+    current_barangay = body.get('addressBarangay') or body.get('currentAddressBarangay') or ''
+    current_municipality = body.get('addressMunicipality') or body.get('currentAddressMunicipality') or body.get('municipality') or body.get('city') or ''
+    current_province = body.get('addressProvince') or body.get('currentAddressProvince') or body.get('province') or ''
+    current_region = body.get('addressRegion') or body.get('currentAddressRegion') or body.get('region') or ''
+    current_zip = body.get('addressZip') or body.get('currentAddressZip') or body.get('zipCode') or body.get('zipcode') or ''
+    current_country = body.get('addressCountry') or body.get('currentAddressCountry') or body.get('country') or 'Philippines'
+    current_landmark = body.get('addressPermanentNotes') or body.get('currentAddressLandmark') or ''
+    
+    # Permanent Address (official/home address)
+    same_as_current = body.get('sameAsCurrent', False)
+    
+    if same_as_current:
+        # Copy current to permanent
+        permanent_street = current_street
+        permanent_barangay = current_barangay
+        permanent_municipality = current_municipality
+        permanent_province = current_province
+        permanent_region = current_region
+        permanent_zip = current_zip
+        permanent_country = current_country
+        permanent_notes = current_landmark
+    else:
+        # Use separate permanent address fields
+        permanent_street = body.get('permanentAddressStreet') or ''
+        permanent_barangay = body.get('permanentAddressBarangay') or ''
+        permanent_municipality = body.get('permanentAddressMunicipality') or ''
+        permanent_province = body.get('permanentAddressProvince') or ''
+        permanent_region = body.get('permanentAddressRegion') or ''
+        permanent_zip = body.get('permanentAddressZip') or ''
+        permanent_country = body.get('permanentAddressCountry') or 'Philippines'
+        permanent_notes = body.get('permanentAddressNotes') or ''
+    
+    # Build full address strings
+    current_address_full = ', '.join([p for p in [
+        current_street, current_barangay, current_municipality, 
+        current_province, current_region, current_country, current_zip
+    ] if p])
+    
+    permanent_address_full = ', '.join([p for p in [
+        permanent_street, permanent_barangay, permanent_municipality, 
+        permanent_province, permanent_region, permanent_country, permanent_zip
+    ] if p])
+    
+    # Legacy address field (defaults to permanent)
+    address = permanent_address_full or current_address_full
+    
+    db = _ensure_users()
+    if student_id in db['users']:
+        return jsonify(error='Student ID already exists'), 400
+    
+    student = {
+        'id': student_id,
+        'studentId': student_id,
+        'userType': 'student',
+        'role': 'student',
+        
+        # Personal Information
+        'firstName': first,
+        'middleName': middle,
+        'lastName': last,
+        'suffix': suffix,
+        'fullName': full,
+        'email': email,
+        'phone': phone,
+        'gender': gender,
+        'birthday': birthday,
+        'age': age,
+        
+        # Academic Information
+        'department': department,
+        'course': course,
+        'year': year,
+        'yearLevel': year,
+        'section': block,
+        'block': block,
+        
+        # Current Address Fields
+        'currentAddressStreet': current_street,
+        'currentAddressBarangay': current_barangay,
+        'currentAddressMunicipality': current_municipality,
+        'currentAddressProvince': current_province,
+        'currentAddressRegion': current_region,
+        'currentAddressZip': current_zip,
+        'currentAddressCountry': current_country,
+        'currentAddressLandmark': current_landmark,
+        'currentAddressFull': current_address_full,
+        
+        # Permanent Address Fields
+        'permanentAddressStreet': permanent_street,
+        'permanentAddressBarangay': permanent_barangay,
+        'permanentAddressMunicipality': permanent_municipality,
+        'permanentAddressProvince': permanent_province,
+        'permanentAddressRegion': permanent_region,
+        'permanentAddressZip': permanent_zip,
+        'permanentAddressCountry': permanent_country,
+        'permanentAddressNotes': permanent_notes,
+        'permanentAddressFull': permanent_address_full,
+        
+        # Address Management
+        'sameAsCurrent': same_as_current,
+        
+        # Legacy address fields (for backward compatibility)
+        'street': current_street,
+        'barangay': current_barangay,
+        'municipality': current_municipality,
+        'province': current_province,
+        'region': current_region,
+        'zipCode': current_zip,
+        'country': current_country,
+        'address': address,
+        'addressPermanent': permanent_address_full,
+        
+        # Security
+        'twoFactorEnabled': False,
+        
+        # System Fields
+        'createdAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'systemTag': 'JRMSU-KCS',
+        'accountStatus': 'active'
+    }
+    
+    db['users'][student_id] = student
+    save_db(db)
+    log_activity(student_id, 'student_register')
+    _emit('students.updated', student_id, student)
+    return jsonify(ok=True, student=student)
+
+@app.route('/api/students/<student_id>/2fa/setup', methods=['POST'])
+def students_2fa_setup(student_id: str):
+    r = twofa_generate()
+    data = r.get_json()
+    db = _ensure_users()
+    u = (db.get('users') or {}).get(student_id)
+    if not u:
+        return jsonify(error='Student not found'), 404
+    u['twoFactorSetupKey'] = data.get('secret')
+    db['users'][student_id] = u
+    save_db(db)
+    return jsonify(secret=data.get('secret'), otpauth=data.get('otpauth'), currentCode=data.get('currentCode'))
+
+@app.route('/api/students/<student_id>/2fa/verify', methods=['POST'])
+def students_2fa_verify(student_id: str):
+    body = request.get_json(force=True) or {}
+    secret = (body.get('secret') or '').strip()
+    token = (body.get('token') or body.get('totpCode') or '').strip()
+    ok = verify_totp_code(secret, token, window=1)
+    if not ok:
+        return jsonify(valid=False), 400
+    db = _ensure_users()
+    u = (db.get('users') or {}).get(student_id)
+    if not u:
+        return jsonify(error='Student not found'), 404
+    u['twoFactorEnabled'] = True
+    u['twoFactorKey'] = secret
+    db['users'][student_id] = u
+    save_db(db)
+    log_activity(student_id, '2fa_enable')
+    _emit('students.updated', student_id, {'twoFactorEnabled': True})
+    return jsonify(valid=True)
+
+@app.route('/api/students/<student_id>/2fa/disable', methods=['POST'])
+def students_2fa_disable(student_id: str):
+    db = _ensure_users()
+    u = (db.get('users') or {}).get(student_id)
+    if not u:
+        return jsonify(error='Student not found'), 404
+    u['twoFactorEnabled'] = False
+    u.pop('twoFactorKey', None)
+    db['users'][student_id] = u
+    save_db(db)
+    log_activity(student_id, '2fa_disable')
+    _emit('students.updated', student_id, {'twoFactorEnabled': False})
+    return jsonify(ok=True)
+
 @app.route('/api/users/<uid>', methods=['PATCH'])
 def update_user(uid: str):
     db = load_db()

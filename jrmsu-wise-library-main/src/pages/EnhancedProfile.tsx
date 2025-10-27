@@ -38,7 +38,35 @@ const EnhancedProfile = () => {
     block: (user?.section as any) || "",
     currentAddress: (user?.address as any) || "",
     // Profile picture
-    profilePicture: (user?.profilePicture as any) || ""
+    profilePicture: (user?.profilePicture as any) || "",
+    
+    // Admin-editable fields
+    firstName: user?.firstName || "",
+    middleName: user?.middleName || "",
+    lastName: user?.lastName || "",
+    suffix: (user as any)?.suffix || "",
+    gender: (user as any)?.gender || "",
+    age: (user as any)?.age || "",
+    birthday: (user as any)?.birthday || "",
+    email: user?.email || "",
+    contactNumber: (user as any)?.phone || (user as any)?.contact || "",
+    
+    // Address fields - Permanent
+    permanentRegion: (user as any)?.region || "",
+    permanentProvince: (user as any)?.province || "",
+    permanentMunicipality: (user as any)?.municipality || "",
+    permanentBarangay: (user as any)?.barangay || "",
+    permanentStreet: (user as any)?.street || "",
+    permanentZipCode: (user as any)?.zipCode || "",
+    
+    // Address fields - Current (for admin)
+    currentRegion: "",
+    currentProvince: "",
+    currentMunicipality: "",
+    currentBarangay: "",
+    currentStreet: "",
+    currentZipCode: "",
+    currentLandmark: ""
   });
 
   useEffect(() => {
@@ -138,7 +166,9 @@ const EnhancedProfile = () => {
 const handleSave = async () => {
     // Persist to database and session
     if (!user?.id) return;
+    
     const updates: any = {
+      // Student fields
       department: formData.department,
       course: formData.course,
       year: formData.yearLevel,
@@ -146,6 +176,52 @@ const handleSave = async () => {
       address: formData.currentAddress,
       profilePicture: formData.profilePicture,
     };
+    
+    // Admin-specific fields
+    if (userType === "admin") {
+      updates.firstName = formData.firstName;
+      updates.middleName = formData.middleName;
+      updates.lastName = formData.lastName;
+      updates.suffix = formData.suffix;
+      updates.gender = formData.gender;
+      updates.age = formData.age;
+      updates.birthday = formData.birthday;
+      updates.email = formData.email;
+      updates.phone = formData.contactNumber;
+      updates.contact = formData.contactNumber;
+      
+      // Address fields
+      updates.region = formData.permanentRegion;
+      updates.province = formData.permanentProvince;
+      updates.municipality = formData.permanentMunicipality;
+      updates.barangay = formData.permanentBarangay;
+      updates.street = formData.permanentStreet;
+      updates.zipCode = formData.permanentZipCode;
+      
+      // Current address (build complete string)
+      const currentAddressParts = [
+        formData.currentStreet,
+        formData.currentBarangay,
+        formData.currentMunicipality,
+        formData.currentProvince,
+        formData.currentRegion,
+        'Philippines',
+        formData.currentZipCode
+      ].filter(Boolean);
+      
+      if (currentAddressParts.length > 0) {
+        updates.currentAddress = currentAddressParts.join(', ');
+        if (formData.currentLandmark) {
+          updates.currentAddress += ` (${formData.currentLandmark})`;
+        }
+      }
+      
+      // Update full name
+      const fullNameParts = [formData.firstName, formData.middleName, formData.lastName, formData.suffix].filter(Boolean);
+      if (fullNameParts.length > 0) {
+        updates.fullName = fullNameParts.join(' ');
+      }
+    }
 const res = databaseService.updateUser(user.id, updates);
     try { await pythonApi.updateUser(user.id, updates); } catch {}
     ActivityService.log(user.id, 'profile_update');
@@ -329,16 +405,50 @@ setQrEnvelope(resp.envelope);
                   <CardTitle>Personal Information</CardTitle>
                   <p className="text-sm text-muted-foreground">
                     {userType === "student" && "✨ Some fields are read-only for security"}
+                    {userType === "admin" && "Admin can edit most information except ID"}
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <Label className="text-muted-foreground">Full Name</Label>
-                      <p className="font-medium p-2 bg-muted/50 rounded">
-                        {userData.firstName} {userData.middleName} {userData.lastName}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-1">Read-only</p>
+                      {isEditing ? (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-3 gap-2">
+                            <Input 
+                              placeholder="First Name"
+                              value={formData.firstName || userData.firstName}
+                              onChange={(e) => setFormData(prev => ({ ...prev, firstName: e.target.value }))}
+                              className="text-sm"
+                            />
+                            <Input 
+                              placeholder="Middle Name"
+                              value={formData.middleName || userData.middleName}
+                              onChange={(e) => setFormData(prev => ({ ...prev, middleName: e.target.value }))}
+                              className="text-sm"
+                            />
+                            <Input 
+                              placeholder="Last Name"
+                              value={formData.lastName || userData.lastName}
+                              onChange={(e) => setFormData(prev => ({ ...prev, lastName: e.target.value }))}
+                              className="text-sm"
+                            />
+                          </div>
+                          <Input 
+                            placeholder="Suffix (Jr., Sr., II)"
+                            value={formData.suffix || userData.suffix || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, suffix: e.target.value }))}
+                            className="text-sm"
+                          />
+                        </div>
+                      ) : (
+                        <>
+                          <p className="font-medium p-2 bg-muted/50 rounded">
+                            {userData.firstName} {userData.middleName} {userData.lastName} {userData.suffix}
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-1">Editable</p>
+                        </>
+                      )}
                     </div>
                     <div>
                       <Label className="text-muted-foreground">
@@ -349,23 +459,81 @@ setQrEnvelope(resp.envelope);
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Gender</Label>
-                      <p className="font-medium p-2 bg-muted/50 rounded">{userData.gender}</p>
-                      <p className="text-xs text-muted-foreground mt-1">Read-only</p>
+                      {isEditing ? (
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant={formData.gender === "Male" ? "default" : "outline"}
+                            className="flex-1 text-sm"
+                            onClick={() => setFormData(prev => ({ ...prev, gender: "Male" }))}
+                          >
+                            Male
+                          </Button>
+                          <Button
+                            type="button"
+                            variant={formData.gender === "Female" ? "default" : "outline"}
+                            className="flex-1 text-sm"
+                            onClick={() => setFormData(prev => ({ ...prev, gender: "Female" }))}
+                          >
+                            Female
+                          </Button>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="font-medium p-2 bg-muted/50 rounded">{userData.gender}</p>
+                          <p className="text-xs text-muted-foreground mt-1">Editable</p>
+                        </>
+                      )}
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Age</Label>
-                      <p className="font-medium p-2 bg-muted/50 rounded">{userData.age}</p>
-                      <p className="text-xs text-muted-foreground mt-1">Read-only</p>
+                      {isEditing ? (
+                        <Input 
+                          type="number"
+                          min="16"
+                          max="100"
+                          value={formData.age || userData.age}
+                          onChange={(e) => setFormData(prev => ({ ...prev, age: e.target.value }))}
+                          className="text-sm"
+                        />
+                      ) : (
+                        <>
+                          <p className="font-medium p-2 bg-muted/50 rounded">{userData.age}</p>
+                          <p className="text-xs text-muted-foreground mt-1">Editable</p>
+                        </>
+                      )}
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Birthday</Label>
-                      <p className="font-medium p-2 bg-muted/50 rounded">{userData.birthday}</p>
-                      <p className="text-xs text-muted-foreground mt-1">Read-only</p>
+                      {isEditing && userType === "admin" ? (
+                        <Input 
+                          type="date"
+                          value={formData.birthday || userData.birthday}
+                          onChange={(e) => setFormData(prev => ({ ...prev, birthday: e.target.value }))}
+                          className="text-sm"
+                        />
+                      ) : (
+                        <>
+                          <p className="font-medium p-2 bg-muted/50 rounded">{userData.birthday}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{userType === "admin" ? "Editable" : "Read-only"}</p>
+                        </>
+                      )}
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Email Address</Label>
-                      <p className="font-medium p-2 bg-muted/50 rounded">{userData.email}</p>
-                      <p className="text-xs text-muted-foreground mt-1">Read-only</p>
+                      {isEditing && userType === "admin" ? (
+                        <Input 
+                          type="email"
+                          value={formData.email || userData.email}
+                          onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                          className="text-sm"
+                        />
+                      ) : (
+                        <>
+                          <p className="font-medium p-2 bg-muted/50 rounded">{userData.email}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{userType === "admin" ? "Editable" : "Read-only"}</p>
+                        </>
+                      )}
                     </div>
                   </div>
                 </CardContent>
@@ -397,9 +565,11 @@ setQrEnvelope(resp.envelope);
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {departments.map(dept => (
-                              <SelectItem key={dept} value={dept}>{dept}</SelectItem>
-                            ))}
+                            <SelectItem value="cte">Teacher Education</SelectItem>
+                            <SelectItem value="cba">Business Administration</SelectItem>
+                            <SelectItem value="cafse">Agriculture & Forestry</SelectItem>
+                            <SelectItem value="scje">Criminal Justice Education</SelectItem>
+                            <SelectItem value="ccs">Computing Studies</SelectItem>
                           </SelectContent>
                         </Select>
                       ) : (
@@ -417,9 +587,38 @@ setQrEnvelope(resp.envelope);
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {(coursesByDepartment[formData.department] || []).map(course => (
-                              <SelectItem key={course} value={course}>{course}</SelectItem>
-                            ))}
+                            {formData.department === "cte" && (
+                              <>
+                                <SelectItem value="bsfil">BS Filipino</SelectItem>
+                                <SelectItem value="bssci">BS Science</SelectItem>
+                                <SelectItem value="bsee">BS Elementary Ed</SelectItem>
+                                <SelectItem value="bsmath">BS Math</SelectItem>
+                                <SelectItem value="bspe">BS PE</SelectItem>
+                              </>
+                            )}
+                            {formData.department === "cba" && (
+                              <>
+                                <SelectItem value="bhm">BS Hospitality Management</SelectItem>
+                                <SelectItem value="bbahrm">BSBA – HR Management</SelectItem>
+                                <SelectItem value="bsab">BS Agri-Business</SelectItem>
+                              </>
+                            )}
+                            {formData.department === "cafse" && (
+                              <>
+                                <SelectItem value="bsa">BS Agriculture</SelectItem>
+                                <SelectItem value="bsf">BS Forestry</SelectItem>
+                                <SelectItem value="bsabe">BS Agri & Biosystems Eng.</SelectItem>
+                              </>
+                            )}
+                            {formData.department === "scje" && (
+                              <SelectItem value="none">No course required</SelectItem>
+                            )}
+                            {formData.department === "ccs" && (
+                              <>
+                                <SelectItem value="bsis">BS Information System</SelectItem>
+                                <SelectItem value="bscs">BS Computer Science</SelectItem>
+                              </>
+                            )}
                           </SelectContent>
                         </Select>
                       ) : (
@@ -437,9 +636,10 @@ setQrEnvelope(resp.envelope);
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {yearLevels.map(year => (
-                              <SelectItem key={year} value={year}>{year}</SelectItem>
-                            ))}
+                            <SelectItem value="1">1st Year</SelectItem>
+                            <SelectItem value="2">2nd Year</SelectItem>
+                            <SelectItem value="3">3rd Year</SelectItem>
+                            <SelectItem value="4">4th Year</SelectItem>
                           </SelectContent>
                         </Select>
                       ) : (
@@ -448,23 +648,8 @@ setQrEnvelope(resp.envelope);
                     </div>
                     <div className="space-y-2">
                       <Label>Block</Label>
-                      {isEditing ? (
-                        <Select 
-                          value={formData.block} 
-                          onValueChange={(value) => setFormData(prev => ({ ...prev, block: value }))}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {blocks.map(block => (
-                              <SelectItem key={block} value={block}>{block}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <p className="font-medium p-2 bg-white/70 rounded border">{formData.block}</p>
-                      )}
+                      <p className="font-medium p-2 bg-muted/50 rounded">{(user as any)?.section || 'Not specified'}</p>
+                      <p className="text-xs text-muted-foreground mt-1">Read-only (extracted from Student ID)</p>
                     </div>
                   </div>
                 </CardContent>
@@ -496,8 +681,20 @@ setQrEnvelope(resp.envelope);
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label className="text-muted-foreground">Contact Number</Label>
-                    <p className="font-medium p-2 bg-muted/50 rounded">{userData.contact}</p>
-                    <p className="text-xs text-muted-foreground mt-1">Read-only</p>
+                    {isEditing && userType === "admin" ? (
+                      <Input 
+                        type="tel"
+                        value={formData.contactNumber || userData.contact}
+                        onChange={(e) => setFormData(prev => ({ ...prev, contactNumber: e.target.value }))}
+                        className="text-sm"
+                        placeholder="09123456789"
+                      />
+                    ) : (
+                      <>
+                        <p className="font-medium p-2 bg-muted/50 rounded">{userData.contact}</p>
+                        <p className="text-xs text-muted-foreground mt-1">{userType === "admin" ? "Editable" : "Read-only"}</p>
+                      </>
+                    )}
                   </div>
                 </div>
               </CardContent>
@@ -508,31 +705,161 @@ setQrEnvelope(resp.envelope);
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   Address Information
-                  {userType === "student" && (
-                    <Badge variant="outline" className="text-green-600 border-green-600">
-                      Current Address Editable
-                    </Badge>
-                  )}
+                  <Badge variant="outline" className="text-green-600 border-green-600">
+                    {userType === "admin" ? "All Addresses Editable" : "Current Address Editable"}
+                  </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                {/* Permanent Address */}
                 <div className="space-y-2">
-                  <Label>Current Address</Label>
-                  {isEditing && userType === "student" ? (
-                    <Input
-                      value={formData.currentAddress}
-                      onChange={(e) => setFormData(prev => ({ ...prev, currentAddress: e.target.value }))}
-                      className="bg-white/70"
-                    />
+                  <Label>Permanent Address</Label>
+                  {isEditing && userType === "admin" ? (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                        <Input
+                          placeholder="Region"
+                          value={formData.permanentRegion || userData.region || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, permanentRegion: e.target.value }))}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Province"
+                          value={formData.permanentProvince || userData.province || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, permanentProvince: e.target.value }))}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Municipality/City"
+                          value={formData.permanentMunicipality || userData.municipality || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, permanentMunicipality: e.target.value }))}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Country"
+                          value="Philippines"
+                          disabled
+                          className="text-sm bg-muted/50"
+                        />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <Input
+                          placeholder="Barangay"
+                          value={formData.permanentBarangay || userData.barangay || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, permanentBarangay: e.target.value }))}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Street (Optional)"
+                          value={formData.permanentStreet || userData.street || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, permanentStreet: e.target.value }))}
+                          className="text-sm"
+                        />
+                        <Input
+                          placeholder="Zip Code"
+                          value={formData.permanentZipCode || userData.zipCode || ''}
+                          onChange={(e) => setFormData(prev => ({ ...prev, permanentZipCode: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                          className="text-sm"
+                        />
+                      </div>
+                    </div>
                   ) : (
                     <p className="font-medium p-2 bg-white/70 rounded border">
-                      {userType === "student" ? formData.currentAddress : (userData.addressFull || [userData.street, userData.barangay, userData.municipality, userData.province, userData.country, userData.zipCode].filter(Boolean).join(', '))}
+                      {userData.addressFull || [userData.street, userData.barangay, userData.municipality, userData.province, userData.region, userData.country, userData.zipCode].filter(Boolean).join(', ') || 'No permanent address on file'}
                     </p>
                   )}
-                  {userType === "admin" && (
-                    <p className="text-xs text-muted-foreground mt-1">Read-only</p>
-                  )}
+                  <p className="text-xs text-muted-foreground mt-1">{userType === "admin" ? "Editable" : "Read-only"}</p>
                 </div>
+                
+                {/* Current Address Section for Admin */}
+                {userType === "admin" && (
+                  <div className="space-y-2">
+                    <Label>Current Address</Label>
+                    {isEditing ? (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <Input
+                            placeholder="Region"
+                            value={formData.currentRegion || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentRegion: e.target.value }))}
+                            className="text-sm"
+                          />
+                          <Input
+                            placeholder="Province"
+                            value={formData.currentProvince || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentProvince: e.target.value }))}
+                            className="text-sm"
+                          />
+                          <Input
+                            placeholder="Municipality/City"
+                            value={formData.currentMunicipality || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentMunicipality: e.target.value }))}
+                            className="text-sm"
+                          />
+                          <Input
+                            placeholder="Country"
+                            value="Philippines"
+                            disabled
+                            className="text-sm bg-muted/50"
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <Input
+                            placeholder="Barangay"
+                            value={formData.currentBarangay || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentBarangay: e.target.value }))}
+                            className="text-sm"
+                          />
+                          <Input
+                            placeholder="Street (Optional)"
+                            value={formData.currentStreet || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentStreet: e.target.value }))}
+                            className="text-sm"
+                          />
+                          <Input
+                            placeholder="Zip Code"
+                            value={formData.currentZipCode || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentZipCode: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                            className="text-sm"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm">Landmark / Notes (Optional)</Label>
+                          <Input
+                            placeholder="near the church, in front of a sari-sari store"
+                            value={formData.currentLandmark || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentLandmark: e.target.value }))}
+                            className="text-sm"
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="font-medium p-2 bg-white/70 rounded border">
+                        {formData.currentAddress || 'No current address specified'}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1">Editable</p>
+                  </div>
+                )}
+                
+                {/* Current Address for Student (existing logic) */}
+                {userType === "student" && (
+                  <div className="space-y-2">
+                    <Label>Current Address</Label>
+                    {isEditing ? (
+                      <Input
+                        value={formData.currentAddress}
+                        onChange={(e) => setFormData(prev => ({ ...prev, currentAddress: e.target.value }))}
+                        className="bg-white/70"
+                      />
+                    ) : (
+                      <p className="font-medium p-2 bg-white/70 rounded border">
+                        {formData.currentAddress || 'No current address specified'}
+                      </p>
+                    )}
+                    <p className="text-xs text-muted-foreground mt-1">Editable</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
 

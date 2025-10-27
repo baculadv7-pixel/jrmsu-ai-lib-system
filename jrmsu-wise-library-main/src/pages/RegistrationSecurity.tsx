@@ -9,6 +9,8 @@ import { Eye, EyeOff, CheckCircle2, Loader2, QrCode } from "lucide-react";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
 import { toast } from "@/hooks/use-toast";
 import { databaseService } from "@/services/database";
+import { adminApiService, type AdminRegistrationData } from "@/services/adminApi";
+import { studentApiService, type StudentRegistrationData } from "@/services/studentApi";
 
 const RegistrationSecurity = () => {
   const navigate = useNavigate();
@@ -113,24 +115,163 @@ const RegistrationSecurity = () => {
         gender: data.gender,
         birthday: data.birthdate,
         age: data.age,
+        
+        // Address data - comprehensive
         address: [
           data.addressStreet,
           data.addressBarangay,
           data.addressMunicipality,
           data.addressProvince,
+          data.addressRegion,
           data.addressCountry,
           data.addressZip
-        ].filter(Boolean).join(', ') || undefined
+        ].filter(Boolean).join(', ') || undefined,
+        
+        // Additional address fields for admin profile editing
+        street: data.addressStreet,
+        barangay: data.addressBarangay,
+        municipality: data.addressMunicipality,
+        province: data.addressProvince,
+        region: data.addressRegion,
+        country: data.addressCountry,
+        zipCode: data.addressZip,
+        
+        // Permanent address
+        permanentAddress: data.addressPermanent,
+        permanentAddressNotes: data.addressPermanentNotes,
+        sameAsCurrent: data.sameAsCurrent
       };
       
-      // Create user in database
-      const createResult = databaseService.createUser(userData);
-      
-      if (!createResult.success) {
-        throw new Error(createResult.error || "Failed to create user account");
+      // Handle admin registration with enhanced API
+      if (data.role === 'admin') {
+        const adminData: AdminRegistrationData = {
+          firstName: data.firstName,
+          middleName: data.middleName,
+          lastName: data.lastName,
+          suffix: data.suffix,
+          age: data.age,
+          birthdate: data.birthdate,
+          gender: data.gender || '',
+          email: data.email,
+          phone: data.phone,
+          
+          addressRegion: data.addressRegion || '',
+          addressProvince: data.addressProvince || '',
+          addressMunicipality: data.addressMunicipality || '',
+          addressBarangay: data.addressBarangay || '',
+          addressStreet: data.addressStreet,
+          addressCountry: data.addressCountry || 'Philippines',
+          addressZip: data.addressZip || '',
+          
+          addressPermanent: data.addressPermanent || '',
+          sameAsCurrent: data.sameAsCurrent,
+          addressPermanentNotes: data.addressPermanentNotes,
+          permanentAddressStreet: data.permanentAddressStreet,
+          permanentAddressBarangay: data.permanentAddressBarangay,
+          permanentAddressMunicipality: data.permanentAddressMunicipality,
+          permanentAddressProvince: data.permanentAddressProvince,
+          permanentAddressRegion: data.permanentAddressRegion,
+          permanentAddressCountry: data.permanentAddressCountry || 'Philippines',
+          permanentAddressZip: data.permanentAddressZip,
+          
+          adminId: data.adminId || '',
+          position: data.position || '',
+          password: data.password || ''
+        };
+        
+        const apiResult = await adminApiService.registerAdmin(adminData);
+        
+        if (!apiResult.success) {
+          throw new Error(apiResult.message || "Failed to create admin account");
+        }
+        
+        // Also sync with local database service
+        await adminApiService.syncWithLocalDatabase({
+          adminId: data.adminId,
+          firstName: data.firstName,
+          middleName: data.middleName,
+          lastName: data.lastName,
+          fullName: userData.fullName,
+          email: data.email,
+          position: data.position,
+          phone: data.phone,
+          gender: data.gender,
+          birthdate: data.birthdate,
+          age: data.age,
+          address: userData.address,
+          passwordHash: userData.passwordHash
+        });
+        
+        console.log('✅ Admin registered successfully:', data.adminId);
+        
+      } else {
+        // Handle student registration with enhanced API
+        const studentData: StudentRegistrationData = {
+          firstName: data.firstName,
+          middleName: data.middleName,
+          lastName: data.lastName,
+          suffix: data.suffix,
+          age: data.age,
+          birthdate: data.birthdate,
+          gender: data.gender || '',
+          email: data.email,
+          phone: data.phone,
+          
+          addressRegion: data.addressRegion || '',
+          addressProvince: data.addressProvince || '',
+          addressMunicipality: data.addressMunicipality || '',
+          addressBarangay: data.addressBarangay || '',
+          addressStreet: data.addressStreet,
+          addressCountry: data.addressCountry || 'Philippines',
+          addressZip: data.addressZip || '',
+          
+          addressPermanent: data.addressPermanent || '',
+          sameAsCurrent: data.sameAsCurrent,
+          addressPermanentNotes: data.addressPermanentNotes,
+          permanentAddressStreet: data.permanentAddressStreet,
+          permanentAddressBarangay: data.permanentAddressBarangay,
+          permanentAddressMunicipality: data.permanentAddressMunicipality,
+          permanentAddressProvince: data.permanentAddressProvince,
+          permanentAddressRegion: data.permanentAddressRegion,
+          permanentAddressCountry: data.permanentAddressCountry || 'Philippines',
+          permanentAddressZip: data.permanentAddressZip,
+          
+          studentId: data.studentId || '',
+          department: data.department || '',
+          course: data.course || '',
+          yearLevel: data.yearLevel || '',
+          block: data.block || studentApiService.extractBlockFromStudentId(data.studentId || ''),
+          password: data.password || ''
+        };
+        
+        const apiResult = await studentApiService.registerStudent(studentData);
+        
+        if (!apiResult.success) {
+          throw new Error(apiResult.message || "Failed to create student account");
+        }
+        
+        // Also sync with local database service
+        await studentApiService.syncWithLocalDatabase({
+          studentId: data.studentId,
+          firstName: data.firstName,
+          middleName: data.middleName,
+          lastName: data.lastName,
+          fullName: userData.fullName,
+          email: data.email,
+          department: data.department,
+          course: data.course,
+          yearLevel: data.yearLevel,
+          block: studentData.block,
+          phone: data.phone,
+          gender: data.gender,
+          birthdate: data.birthdate,
+          age: data.age,
+          address: userData.address,
+          passwordHash: userData.passwordHash
+        });
+        
+        console.log('✅ Student registered successfully:', data.studentId);
       }
-      
-      console.log('✅ User created successfully:', createResult.user?.id);
 
       try {
         // Also persist to Python backend for global sync
