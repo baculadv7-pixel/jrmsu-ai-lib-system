@@ -17,6 +17,7 @@ import { NotificationsAPI, type NotificationItem } from "@/services/notification
 import { SettingsDropdown } from "@/components/settings/SettingsDropdown";
 import { getViewportMode } from "@/hooks/useViewportMode";
 import { API } from "@/config/api";
+import { PasswordResetOverlay } from "@/components/notifications/PasswordResetOverlay";
 
 interface NavbarProps {
   userType: "student" | "admin";
@@ -33,28 +34,46 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
   const [overlayOpen, setOverlayOpen] = useState(false);
   const [selectedId, setSelectedId] = useState<string|undefined>(undefined);
   const [selected, setSelected] = useState<NotificationItem|undefined>(undefined);
+  const [passwordResetOverlayOpen, setPasswordResetOverlayOpen] = useState(false);
+  const [passwordResetData, setPasswordResetData] = useState<any>(null);
 
   const reload = async (f: 'all'|'unread'=filter) => {
+    if (!user?.id) return;
+    
+    // Use local NotificationsService directly (primary source)
+    const local = NotificationsService.list(user?.id);
+    const items = local.map(n=>({
+      id: n.id,
+      user_id: user?.id || 'guest',
+      title: 'Notification',
+      body: n.message,
+      type: n.type,
+      meta: n.metadata,
+      created_at: new Date(n.createdAt).getTime()/1000,
+      read: n.status === 'read',
+    })) as NotificationItem[];
+    
+    // Filter if needed
+    const filtered = f === 'unread' ? items.filter(n => !n.read) : items;
+    setNotifications(filtered.sort((a,b)=> (a.created_at < b.created_at ? 1 : -1)));
+    setUnread(local.filter(n=>n.status==='unread').length);
+    
+    // Try to sync with backend API (optional, non-blocking)
     try {
-      if (!user?.id) return;
       const res = await NotificationsAPI.list({ userId: user.id, filter: f, page: 1, limit: 25 });
-      // Ensure newest -> oldest
-      const items = res.items.slice().sort((a,b)=> (a.created_at < b.created_at ? 1 : -1));
-      setNotifications(items);
-      setUnread(res.unread);
-    } catch {
-      const local = NotificationsService.list(user?.id);
-      const items = local.map(n=>({
-        id: n.id,
-        user_id: user?.id || 'guest',
-        title: 'Notification',
-        body: n.message,
-        type: n.type,
-        created_at: new Date(n.createdAt).getTime()/1000,
-        read: n.status === 'read',
-      })) as NotificationItem[];
-      setNotifications(items.sort((a,b)=> (a.created_at < b.created_at ? 1 : -1)));
-      setUnread(local.filter(n=>n.status==='unread').length);
+      // Merge backend notifications if available
+      const backendItems = res.items.slice().sort((a,b)=> (a.created_at < b.created_at ? 1 : -1));
+      if (backendItems.length > 0) {
+        // Combine local and backend, remove duplicates
+        const combined = [...items, ...backendItems];
+        const unique = combined.filter((item, index, self) => 
+          index === self.findIndex((t) => t.id === item.id)
+        );
+        setNotifications(unique.sort((a,b)=> (a.created_at < b.created_at ? 1 : -1)));
+      }
+    } catch (err) {
+      // Backend not available, use local only (already set above)
+      console.log('Using local notifications only');
     }
   };
 
@@ -94,12 +113,24 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
   useEffect(() => {
     if (!user?.id) return;
     reload();
+    
+    // Subscribe to local NotificationsService updates
+    const unsubscribeLocal = NotificationsService.subscribe(() => {
+      console.log('📢 Notification update detected, reloading...');
+      reload();
+    });
+    
+    // Also connect to backend API (optional)
     const disconnect = NotificationsAPI.connect(user.id, {
       onNew: (n) => setNotifications((prev) => [n, ...prev.filter(p=>p.id!==n.id)]),
       onUpdate: (n) => setNotifications((prev) => prev.map(p=>p.id===n.id?n:p)),
       onMarkAll: () => setNotifications((prev)=>prev.map(p=>({...p, read: true}))),
     });
-    return () => disconnect();
+    
+    return () => {
+      unsubscribeLocal();
+      disconnect();
+    };
   }, [user?.id]);
 
   const unreadCount = useMemo(() => unread ?? notifications.filter((n) => !n.read).length, [unread, notifications]);
@@ -121,11 +152,27 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
     if (!user?.id) return;
     try {
       const n = await NotificationsAPI.get(user.id, id);
-      setSelected(n);
-      setSelectedId(id);
-      setOverlayOpen(true);
-      // Mark as read if not already
-      if (!n.read) { await NotificationsAPI.markRead(user.id, [id]); await reload(filter); }
+      
+      // Check if this is a password reset request
+      if (n.type === 'password_reset_request' && n.meta) {
+        setPasswordResetData({
+          requesterId: n.meta.requesterId,
+          requesterName: n.meta.requesterName,
+          requesterEmail: n.meta.requesterEmail,
+          requestTime: n.meta.requestTime || new Date(n.created_at * 1000).toLocaleString(),
+          notificationId: n.id
+        });
+        setPasswordResetOverlayOpen(true);
+        // Mark as read
+        if (!n.read) { await NotificationsAPI.markRead(user.id, [id]); await reload(filter); }
+      } else {
+        // Regular notification
+        setSelected(n);
+        setSelectedId(id);
+        setOverlayOpen(true);
+        // Mark as read if not already
+        if (!n.read) { await NotificationsAPI.markRead(user.id, [id]); await reload(filter); }
+      }
     } catch {}
   };
 
@@ -198,22 +245,76 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
                   <DialogTitle>{selected?.title || 'Notification'}</DialogTitle>
                   <DialogDescription>{new Date((selected?.created_at||0)*1000).toLocaleString()}</DialogDescription>
                 </DialogHeader>
-                <div className="space-y-2">
+                <div className="space-y-4">
                   <p className="text-sm whitespace-pre-wrap">{selected?.body}</p>
-                  {selected?.meta?.requestId && selected?.type === 'password_reset_request' && (
-                    <div className="flex gap-2 pt-2">
-                      <Button size="sm" onClick={async ()=>{
-                        try{
-await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:selected?.meta?.requestId, action:'grant', adminId: user?.id||'ADMIN'})});
-                          setOverlayOpen(false);
-                        }catch{}
-                      }}>Grant</Button>
-                      <Button size="sm" variant="outline" onClick={async ()=>{
-                        try{
-await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({requestId:selected?.meta?.requestId, action:'decline', adminId: user?.id||'ADMIN'})});
-                          setOverlayOpen(false);
-                        }catch{}
-                      }}>Decline</Button>
+                  
+                  {/* Password Reset Request Details */}
+                  {selected?.type === 'password_reset_request' && selected?.meta && (
+                    <div className="border rounded-lg p-4 space-y-3 bg-muted/50">
+                      <h4 className="font-semibold text-sm">Request Details</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">User ID:</span>
+                          <span className="font-medium">{selected.meta.requesterId}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Full Name:</span>
+                          <span className="font-medium">{selected.meta.requesterName}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Email:</span>
+                          <span className="font-medium">{selected.meta.requesterEmail}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Request Time:</span>
+                          <span className="font-medium">{new Date(selected.meta.requestTime).toLocaleString()}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Grant/Decline Buttons */}
+                      <div className="flex gap-2 pt-2">
+                        <Button 
+                          className="flex-1 bg-green-600 hover:bg-green-700" 
+                          onClick={async ()=>{
+                            try{
+                              await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{
+                                method:'POST',
+                                headers:{'Content-Type':'application/json'},
+                                body:JSON.stringify({
+                                  requestId: selected.meta.requesterId, 
+                                  action:'grant', 
+                                  adminId: user?.id||'ADMIN'
+                                })
+                              });
+                              setOverlayOpen(false);
+                              reload();
+                            }catch{}
+                          }}
+                        >
+                          Grant Reset
+                        </Button>
+                        <Button 
+                          className="flex-1" 
+                          variant="destructive" 
+                          onClick={async ()=>{
+                            try{
+                              await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{
+                                method:'POST',
+                                headers:{'Content-Type':'application/json'},
+                                body:JSON.stringify({
+                                  requestId: selected.meta.requesterId, 
+                                  action:'decline', 
+                                  adminId: user?.id||'ADMIN'
+                                })
+                              });
+                              setOverlayOpen(false);
+                              reload();
+                            }catch{}
+                          }}
+                        >
+                          Decline
+                        </Button>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -239,6 +340,19 @@ await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{method:'POST',headers:
           </div>
         </div>
       </div>
+      
+      {/* Password Reset Overlay */}
+      {passwordResetData && (
+        <PasswordResetOverlay
+          isOpen={passwordResetOverlayOpen}
+          onClose={() => {
+            setPasswordResetOverlayOpen(false);
+            setPasswordResetData(null);
+            reload();
+          }}
+          requestData={passwordResetData}
+        />
+      )}
     </nav>
   );
 };

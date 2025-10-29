@@ -289,6 +289,145 @@ class StudentDB:
         query = "SELECT * FROM v_student_profiles WHERE department = %s ORDER BY year_level, block, last_name"
         return execute_query(query, (department,), fetch_all=True) or []
 
+# Admin-specific database operations
+class AdminDB:
+    """Database operations for admin management"""
+
+    @staticmethod
+    def get_admin_by_id(admin_id: str) -> Optional[Dict]:
+        """Get admin by ID (admin_id)"""
+        # Prefer explicit admins table view; fallback to direct table
+        query = "SELECT * FROM admins WHERE admin_id = %s OR id = %s"
+        return execute_query(query, (admin_id, admin_id), fetch_one=True)
+
+    @staticmethod
+    def list_all_admins() -> List[Dict]:
+        """List all admins"""
+        query = "SELECT * FROM admins ORDER BY last_name, first_name"
+        return execute_query(query, fetch_all=True) or []
+
+    @staticmethod
+    def register_admin(
+        admin_id: str,
+        first_name: str,
+        middle_name: str,
+        last_name: str,
+        suffix: str,
+        birthdate: str,
+        gender: str,
+        email: str,
+        phone: str,
+        position: str,
+        street: str,
+        barangay: str,
+        municipality: str,
+        province: str,
+        region: str,
+        zip_code: str,
+        current_street: str,
+        current_barangay: str,
+        current_municipality: str,
+        current_province: str,
+        current_region: str,
+        current_zip: str,
+        current_landmark: str,
+        same_as_current: bool,
+        password_hash: str
+    ) -> Tuple[bool, str]:
+        """
+        Register a new admin using stored procedure with current address support.
+        Returns (success, message)
+        """
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                # OUT parameters
+                success_out = cursor.var(int)
+                message_out = cursor.var(str)
+                
+                cursor.callproc('sp_register_admin', [
+                    admin_id, first_name, middle_name, last_name, suffix,
+                    birthdate, gender, email, phone,
+                    position,
+                    street, barangay, municipality, province, region, zip_code,
+                    current_street, current_barangay, current_municipality,
+                    current_province, current_region, current_zip, current_landmark,
+                    same_as_current, password_hash,
+                    success_out, message_out
+                ])
+                
+                conn.commit()
+                cursor.close()
+                
+                return True, f"Admin {admin_id} registered successfully"
+                
+        except Error as e:
+            error_msg = str(e)
+            if 'already exists' in error_msg.lower():
+                if 'email' in error_msg.lower():
+                    return False, "Email already registered"
+                else:
+                    return False, "Admin ID already exists"
+            return False, f"Registration failed: {error_msg}"
+
+    @staticmethod
+    def update_admin_profile(
+        admin_id: str,
+        first_name: str,
+        middle_name: str,
+        last_name: str,
+        suffix: str,
+        gender: str,
+        age: str,
+        birthdate: str,
+        email: str,
+        phone: str,
+        street: str,
+        barangay: str,
+        municipality: str,
+        province: str,
+        region: str,
+        zip_code: str,
+        current_street: str,
+        current_barangay: str,
+        current_municipality: str,
+        current_province: str,
+        current_region: str,
+        current_zip: str,
+        current_landmark: str
+    ) -> Tuple[bool, str]:
+        """
+        Update editable admin profile fields (position and admin_id are read-only).
+        Uses stored procedure.
+        """
+        try:
+            with get_db_connection() as conn:
+                cursor = conn.cursor()
+                
+                success_out = cursor.var(int)
+                message_out = cursor.var(str)
+                
+                cursor.callproc('sp_update_admin_profile', [
+                    admin_id, first_name, middle_name, last_name, suffix,
+                    gender, age, birthdate, email, phone,
+                    street, barangay, municipality, province, region, zip_code,
+                    current_street, current_barangay, current_municipality,
+                    current_province, current_region, current_zip, current_landmark,
+                    success_out, message_out
+                ])
+                
+                conn.commit()
+                cursor.close()
+                
+                return True, "Profile updated successfully"
+                
+        except Error as e:
+            error_msg = str(e)
+            if 'not found' in error_msg.lower():
+                return False, "Admin not found"
+            return False, f"Update failed: {error_msg}"
+
 if __name__ == '__main__':
     # Test connection when run directly
     print("Testing database connection...")

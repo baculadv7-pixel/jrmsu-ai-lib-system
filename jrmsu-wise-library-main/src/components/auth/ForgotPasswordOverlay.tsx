@@ -8,6 +8,7 @@ import { useToast } from "@/hooks/use-toast";
 import { databaseService } from "@/services/database";
 import { ActivityService } from "@/services/activity";
 import { NotificationsService } from "@/services/notifications";
+import { NotificationManager } from "@/services/notificationManager";
 import { useAuth } from "@/context/AuthContext";
 import { AuthResetService } from "@/services/authReset";
 
@@ -141,7 +142,10 @@ export function ForgotPasswordOverlayBody({ onDone, initialId }: { onDone?: () =
     setAdminCooldown(60);
     try {
       await AuthResetService.requestResetByAdmin({ userId: u.id, email: u.email, fullName: u.fullName });
-      ActivityService.log(u.id, 'password_reset_admin_requested');
+      
+      // Send notification to ALL admins using NotificationManager
+      NotificationManager.passwordResetRequest(u.id, u.fullName, u.email);
+      
       // Increment attempts
       const nextCount = (rec.count || 0) + 1;
       const next: { count: number; blockUntil?: number } = { count: nextCount };

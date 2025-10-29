@@ -11,6 +11,7 @@ import { toast } from "@/hooks/use-toast";
 import { databaseService } from "@/services/database";
 import { adminApiService, type AdminRegistrationData } from "@/services/adminApi";
 import { studentApiService, type StudentRegistrationData } from "@/services/studentApi";
+import { NotificationManager } from "@/services/notificationManager";
 
 const RegistrationSecurity = () => {
   const navigate = useNavigate();
@@ -204,6 +205,11 @@ const RegistrationSecurity = () => {
         
         console.log('✅ Admin registered successfully:', data.adminId);
         
+        // Send notification to all admins
+        NotificationManager.adminRegistered(data.adminId || '', userData.fullName);
+        // Send welcome notification to the new admin
+        NotificationManager.welcomeNewUser(data.adminId || '', 'admin');
+        
       } else {
         // Handle student registration with enhanced API
         const studentData: StudentRegistrationData = {
@@ -271,6 +277,11 @@ const RegistrationSecurity = () => {
         });
         
         console.log('✅ Student registered successfully:', data.studentId);
+        
+        // Send notification to all admins
+        NotificationManager.studentRegistered(data.studentId || '', userData.fullName);
+        // Send welcome notification to the new student
+        NotificationManager.welcomeStudent(data.studentId || '');
       }
 
       try {

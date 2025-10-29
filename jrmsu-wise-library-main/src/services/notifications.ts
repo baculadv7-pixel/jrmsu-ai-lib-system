@@ -1,7 +1,24 @@
 import { aiNotificationService, type AINotification } from './aiNotificationService';
 
 export type NotificationStatus = "unread" | "read";
-export type NotificationType = "borrow" | "return" | "overdue" | "system" | "ai";
+export type NotificationType = 
+  | "borrow" 
+  | "return" 
+  | "overdue" 
+  | "system" 
+  | "ai"
+  | "password_reset_request"
+  | "welcome"
+  | "registration"
+  | "password_change"
+  | "profile_update"
+  | "qr_generated"
+  | "login"
+  | "logout"
+  | "book_added"
+  | "book_edited"
+  | "book_removed"
+  | "user_removed";
 
 export interface AppNotification {
   id: string; // NT-<timestamp>
@@ -12,6 +29,7 @@ export interface AppNotification {
   createdAt: string; // ISO datetime
   priority?: "low" | "medium" | "high"; // Added for AI notifications
   actionUrl?: string; // Added for AI notifications
+  metadata?: any; // Additional data for notifications
 }
 
 const KEY = "jrmsu_notifications";
@@ -66,7 +84,7 @@ export const NotificationsService = {
       .filter((n) => n.receiverId === receiverId)
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   },
-  add(input: Omit<AppNotification, "id" | "status" | "createdAt"> & { status?: NotificationStatus }): AppNotification {
+  add(input: Omit<AppNotification, "id" | "status" | "createdAt"> & { status?: NotificationStatus; metadata?: any }): AppNotification {
     // Deduplicate similar messages in the last few entries
     const existing = readAll();
     const norm = (s: string) => s.toLowerCase().replace(/\s+/g,' ').trim();
@@ -82,6 +100,7 @@ export const NotificationsService = {
       receiverId: input.receiverId,
       type: input.type,
       message: input.message,
+      metadata: input.metadata
     };
     const all = readAll();
     all.unshift(item);

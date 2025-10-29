@@ -11,6 +11,11 @@ import bleach
 import threading
 import json as pyjson
 from flask_socketio import SocketIO, emit, join_room, leave_room
+from db import StudentDB, AdminDB, execute_query  # MySQL integration for students and admins
+import bcrypt
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__)
 
@@ -62,6 +67,89 @@ def log_activity(user_id: str, action: str, details: str = ""):
     _emit('activity.new', user_id, rec)
 
 
+# ---- Email Configuration ----
+EMAIL_ENABLED = os.getenv("EMAIL_ENABLED", "false").lower() == "true"
+SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SENDER_EMAIL = os.getenv("SENDER_EMAIL", "noreply@jrmsu.edu.ph")
+SENDER_PASSWORD = os.getenv("SENDER_PASSWORD", "")  # Set via environment variable
+SENDER_NAME = os.getenv("SENDER_NAME", "JRMSU Library System")
+
+def send_reset_email(recipient_email: str, reset_code: str, recipient_name: str = "") -> bool:
+    """
+    Send password reset email with code.
+    Returns True if email sent successfully, False otherwise.
+    If EMAIL_ENABLED is False, just prints to console (dev mode).
+    """
+    if not EMAIL_ENABLED or not SENDER_PASSWORD:
+        print(f"[MAIL] Reset code for {recipient_email}: {reset_code} (expires in 5m)")
+        print(f"[MAIL] Email sending disabled. Set EMAIL_ENABLED=true and SENDER_PASSWORD env vars to enable.")
+        return True  # Consider it "sent" in dev mode
+    
+    try:
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = 'JRMSU Library - Password Reset Code'
+        msg['From'] = f'{SENDER_NAME} <{SENDER_EMAIL}>'
+        msg['To'] = recipient_email
+        
+        # Email body
+        greeting = f"Hello {recipient_name}," if recipient_name else "Hello,"
+        text_body = f"""
+{greeting}
+
+You have requested to reset your password for the JRMSU Library System.
+
+Your password reset code is: {reset_code}
+
+This code will expire in 5 minutes.
+
+If you did not request this password reset, please ignore this email.
+
+Best regards,
+JRMSU Library System
+        """
+        
+        html_body = f"""
+<html>
+  <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+    <div style="max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px;">
+      <h2 style="color: #003366;">JRMSU Library System</h2>
+      <p>{greeting}</p>
+      <p>You have requested to reset your password for the JRMSU Library System.</p>
+      <p>Your password reset code is:</p>
+      <h1 style="background: #f4f4f4; padding: 15px; text-align: center; letter-spacing: 5px; color: #003366;">{reset_code}</h1>
+      <p style="color: #d9534f;"><strong>This code will expire in 5 minutes.</strong></p>
+      <p>If you did not request this password reset, please ignore this email.</p>
+      <hr style="margin: 20px 0; border: none; border-top: 1px solid #ddd;">
+      <p style="font-size: 12px; color: #777;">Best regards,<br>JRMSU Library System</p>
+    </div>
+  </body>
+</html>
+        """
+        
+        # Attach both plain text and HTML versions
+        part1 = MIMEText(text_body, 'plain')
+        part2 = MIMEText(html_body, 'html')
+        msg.attach(part1)
+        msg.attach(part2)
+        
+        # Send email
+        with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
+            server.starttls()
+            server.login(SENDER_EMAIL, SENDER_PASSWORD)
+            server.send_message(msg)
+        
+        print(f"[MAIL] ✅ Email sent successfully to {recipient_email}")
+        return True
+        
+    except Exception as e:
+        print(f"[MAIL] ❌ Failed to send email to {recipient_email}: {str(e)}")
+        # Fallback to console in case of email failure
+        print(f"[MAIL] Reset code for {recipient_email}: {reset_code} (expires in 5m)")
+        return False
+
+
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3:8b-instruct-q4_K_M")
 
@@ -97,16 +185,50 @@ def health():
 # ---------- Users/Profile API ----------
 @app.route('/api/users')
 def list_users():
-    db = load_db()
-    users = list((db.get("users") or {}).values())
-    return jsonify(items=users)
+    # Prefer MySQL admins and students for accuracy, then merge any file-backed users
+    items = []
+    try:
+        arows = AdminDB.list_all_admins() or []
+        for r in arows:
+            items.append(_map_admin_row_to_user(r))
+    except Exception:
+        pass
+    try:
+        rows = StudentDB.list_all_students() or []
+        for r in rows:
+            items.append(_map_student_row_to_user(r))
+    except Exception:
+        pass
+    try:
+        fdb = load_db()
+        users = list((fdb.get("users") or {}).values())
+        # Avoid duplicates by id
+        existing_ids = {u.get('id') for u in items}
+        items.extend([u for u in users if u.get('id') not in existing_ids])
+    except Exception:
+        pass
+    return jsonify(items=items)
 
 @app.route('/api/users/<uid>')
 def get_user(uid: str):
-    db = load_db()
-    u = db.get("users", {}).get(uid)
+    # Try MySQL admin first
+    try:
+        arow = AdminDB.get_admin_by_id(uid)
+        if arow:
+            return jsonify(_map_admin_row_to_user(arow))
+    except Exception:
+        pass
+    # Then student
+    try:
+        row = StudentDB.get_student_by_id(uid)
+        if row:
+            return jsonify(_map_student_row_to_user(row))
+    except Exception:
+        pass
+    # Fallback to file-backed store
+    fdb = load_db()
+    u = fdb.get("users", {}).get(uid)
     if not u:
-        # fallback: build from session/request data if missing
         u = {"id": uid}
     return jsonify(u)
 
@@ -117,103 +239,7 @@ def _ensure_users():
     db.setdefault("users", {})
     return db
 
-@app.route('/api/admins', methods=['GET'])
-def admins_list():
-    db = load_db()
-    users = list((db.get('users') or {}).values())
-    admins = [u for u in users if (u.get('userType') == 'admin' or (u.get('role') == 'admin'))]
-    return jsonify(items=admins)
-
-@app.route('/api/admins/<admin_id>', methods=['GET'])
-def admins_get(admin_id: str):
-    db = load_db()
-    u = (db.get('users') or {}).get(admin_id)
-    if not u or (u.get('userType') != 'admin' and u.get('role') != 'admin'):
-        return jsonify(error='Admin not found'), 404
-    return jsonify(u)
-
-@app.route('/api/admins/<admin_id>', methods=['PUT'])
-def admins_put(admin_id: str):
-    db = _ensure_users()
-    body = request.get_json(force=True) or {}
-    u = (db.get('users') or {}).get(admin_id)
-    if not u:
-        return jsonify(error='Admin not found'), 404
-    # Do not allow changing admin_id
-    body.pop('id', None)
-    body.pop('admin_id', None)
-    # Merge fields
-    u.update(body)
-    # Normalize address composition if parts provided
-    parts = [u.get('street'), u.get('barangay'), u.get('municipality'), u.get('province'), u.get('country'), u.get('zipCode')]
-    if any(parts):
-        u['address'] = ', '.join([p for p in parts if p])
-    db['users'][admin_id] = u
-    save_db(db)
-    log_activity(admin_id, 'profile_update')
-    _emit('admins.updated', admin_id, u)
-    return jsonify(ok=True, admin=u)
-
-@app.route('/api/admins/register', methods=['POST'])
-def admins_register():
-    body = request.get_json(force=True) or {}
-    admin_id = (body.get('adminId') or body.get('admin_id') or body.get('id') or '').strip() or f"KCL-{int(time.time())%100000:05d}"
-    first = (body.get('firstName') or '').strip()
-    middle = (body.get('middleName') or '').strip()
-    last = (body.get('lastName') or '').strip()
-    full = ' '.join([x for x in [first, middle, last] if x]).strip()
-    email = (body.get('email') or '').strip().lower()
-    phone = (body.get('phone') or '').strip()
-    position = (body.get('position') or body.get('role') or 'admin').strip()
-    gender = (body.get('gender') or '').strip()
-    birthday = (body.get('birthdate') or body.get('birthday') or '').strip()
-    age = body.get('age') or ''
-    # Address fields
-    street = body.get('street') or ''
-    barangay = body.get('barangay') or ''
-    municipality = body.get('municipality') or body.get('city') or ''
-    province = body.get('province') or ''
-    region = body.get('region') or ''
-    zip_code = body.get('zipCode') or body.get('zipcode') or ''
-    country = body.get('country') or 'Philippines'
-    address = ', '.join([p for p in [street, barangay, municipality, province, country, zip_code] if p])
-
-    db = _ensure_users()
-    if admin_id in db['users']:
-        return jsonify(error='Admin ID already exists'), 400
-    admin = {
-        'id': admin_id,
-        'adminId': admin_id,
-        'userType': 'admin',
-        'role': position,
-        'position': position,
-        'firstName': first,
-        'middleName': middle,
-        'lastName': last,
-        'fullName': full,
-        'email': email,
-        'phone': phone,
-        'gender': gender,
-        'birthday': birthday,
-        'age': age,
-        'street': street,
-        'barangay': barangay,
-        'municipality': municipality,
-        'province': province,
-        'region': region,
-        'zipCode': zip_code,
-        'country': country,
-        'address': address,
-        'twoFactorEnabled': False,
-        'createdAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-        'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-        'systemTag': 'JRMSU-KCL',
-    }
-    db['users'][admin_id] = admin
-    save_db(db)
-    log_activity(admin_id, 'admin_register')
-    _emit('admins.updated', admin_id, admin)
-    return jsonify(ok=True, admin=admin)
+# Note: All Admin routes (GET/PUT/POST) moved to line 700+ with database integration
 
 @app.route('/api/admins/<admin_id>/2fa/setup', methods=['POST'])
 def admins_2fa_setup(admin_id: str):
@@ -267,55 +293,81 @@ def admins_2fa_disable(admin_id: str):
 
 @app.route('/api/students', methods=['GET'])
 def students_list():
-    db = load_db()
-    users = list((db.get('users') or {}).values())
-    students = [u for u in users if (u.get('userType') == 'student' or (u.get('role') == 'student'))]
-    return jsonify(items=students)
+    try:
+        rows = StudentDB.list_all_students() or []
+        students = [_map_student_row_to_user(r) for r in rows]
+        return jsonify(items=students)
+    except Exception:
+        # Fallback
+        fdb = load_db()
+        users = list((fdb.get('users') or {}).values())
+        students = [u for u in users if (u.get('userType') == 'student' or (u.get('role') == 'student'))]
+        return jsonify(items=students)
 
 @app.route('/api/students/<student_id>', methods=['GET'])
 def students_get(student_id: str):
-    db = load_db()
-    u = (db.get('users') or {}).get(student_id)
-    if not u or (u.get('userType') != 'student' and u.get('role') != 'student'):
-        return jsonify(error='Student not found'), 404
-    return jsonify(u)
+    try:
+        row = StudentDB.get_student_by_id(student_id)
+        if not row:
+            return jsonify(error='Student not found'), 404
+        return jsonify(_map_student_row_to_user(row))
+    except Exception as e:
+        # Fallback to file store
+        fdb = load_db()
+        u = (fdb.get('users') or {}).get(student_id)
+        if not u or (u.get('userType') != 'student' and u.get('role') != 'student'):
+            return jsonify(error='Student not found'), 404
+        return jsonify(u)
 
 @app.route('/api/students/<student_id>', methods=['PUT'])
 def students_put(student_id: str):
-    db = _ensure_users()
     body = request.get_json(force=True) or {}
-    u = (db.get('users') or {}).get(student_id)
-    if not u:
-        return jsonify(error='Student not found'), 404
-    # read-only id
-    body.pop('id', None)
-    body.pop('student_id', None)
-    # Only allow editable student fields (academic + current address + contact)
-    allowed = {
-        'college_department','department','course_major','course','year_level','year','block',
-        'current_address','address','phone','street','barangay','municipality','province','region','zipCode','country'
-    }
-    for k,v in list(body.items()):
-        if k not in allowed:
-            body.pop(k, None)
-    u.update(body)
-    # Normalize block from studentId format if present
-    sid = u.get('id') or u.get('studentId')
-    if sid and '-' in sid:
-        try:
-            # KC-23-A-00762 => block at index 2
-            blk = sid.split('-')[2]
-            u['block'] = u.get('block') or blk
-        except Exception:
-            pass
-    parts = [u.get('street'), u.get('barangay'), u.get('municipality'), u.get('province'), u.get('country') or 'Philippines', u.get('zipCode')]
-    if any(parts):
-        u['address'] = ', '.join([p for p in parts if p])
-    db['users'][student_id] = u
-    save_db(db)
-    log_activity(student_id, 'profile_update')
-    _emit('students.updated', student_id, u)
-    return jsonify(ok=True, student=u)
+    # Map allowed editable fields to stored procedure inputs
+    try:
+        # Determine block from ID if not provided
+        blk = body.get('block')
+        if not blk and '-' in student_id:
+            try:
+                blk = student_id.split('-')[2]
+            except Exception:
+                blk = ''
+
+        ok, msg = StudentDB.update_student_profile(
+            student_id=student_id,
+            department=(body.get('department') or body.get('college_department') or ''),
+            course=(body.get('course') or body.get('course_major') or ''),
+            year_level=(body.get('year') or body.get('year_level') or body.get('yearLevel') or ''),
+            block=blk or '',
+            current_street=body.get('currentStreet') or body.get('street') or '',
+            current_barangay=body.get('currentBarangay') or body.get('barangay') or '',
+            current_municipality=body.get('currentMunicipality') or body.get('municipality') or body.get('city') or '',
+            current_province=body.get('currentProvince') or body.get('province') or '',
+            current_region=body.get('currentRegion') or body.get('region') or '',
+            current_zip=body.get('currentZipCode') or body.get('zipCode') or '',
+            current_landmark=body.get('currentLandmark') or ''
+        )
+        if not ok:
+            return jsonify(error=msg or 'Update failed'), 400
+        # Return fresh row
+        row = StudentDB.get_student_by_id(student_id) or {}
+        student = _map_student_row_to_user(row)
+        log_activity(student_id, 'profile_update')
+        _emit('students.updated', student_id, student)
+        return jsonify(ok=True, student=student)
+    except Exception as e:
+        # Fallback to previous file-backed logic
+        fdb = _ensure_users()
+        u = (fdb.get('users') or {}).get(student_id)
+        if not u:
+            return jsonify(error='Student not found'), 404
+        # Basic merge for fallback
+        for k in list(body.keys()):
+            u[k] = body[k]
+        fdb['users'][student_id] = u
+        save_db(fdb)
+        log_activity(student_id, 'profile_update')
+        _emit('students.updated', student_id, u)
+        return jsonify(ok=True, student=u)
 
 @app.route('/api/students/register', methods=['POST'])
 def students_register():
@@ -323,7 +375,7 @@ def students_register():
     student_id = (body.get('studentId') or body.get('id') or '').strip()
     if not student_id:
         return jsonify(error='Student ID required'), 400
-    
+
     # Extract block from student ID (KC-23-A-00762 => A)
     extracted_block = ''
     if '-' in student_id:
@@ -333,154 +385,129 @@ def students_register():
                 extracted_block = parts[2]
         except Exception:
             pass
-    
+
     # Personal Information
     first = (body.get('firstName') or '').strip()
     middle = (body.get('middleName') or '').strip()
     last = (body.get('lastName') or '').strip()
     suffix = (body.get('suffix') or '').strip()
-    full = ' '.join([x for x in [first, middle, last, suffix] if x]).strip()
     email = (body.get('email') or '').strip().lower()
     phone = (body.get('phone') or '').strip()
     gender = (body.get('gender') or '').strip()
-    birthday = (body.get('birthdate') or body.get('birthday') or '').strip()
-    age = body.get('age') or ''
-    
+    birthdate = (body.get('birthdate') or body.get('birthday') or '').strip()
     # Academic Information
     department = body.get('department') or body.get('college_department') or ''
     course = body.get('course') or body.get('course_major') or ''
-    year = body.get('year') or body.get('year_level') or body.get('yearLevel') or ''
+    year_level = body.get('year') or body.get('year_level') or body.get('yearLevel') or ''
     block = body.get('block') or extracted_block
-    
-    # Current Address (where student currently lives)
+
+    # Current Address
     current_street = body.get('addressStreet') or body.get('currentAddressStreet') or ''
     current_barangay = body.get('addressBarangay') or body.get('currentAddressBarangay') or ''
     current_municipality = body.get('addressMunicipality') or body.get('currentAddressMunicipality') or body.get('municipality') or body.get('city') or ''
     current_province = body.get('addressProvince') or body.get('currentAddressProvince') or body.get('province') or ''
     current_region = body.get('addressRegion') or body.get('currentAddressRegion') or body.get('region') or ''
     current_zip = body.get('addressZip') or body.get('currentAddressZip') or body.get('zipCode') or body.get('zipcode') or ''
-    current_country = body.get('addressCountry') or body.get('currentAddressCountry') or body.get('country') or 'Philippines'
     current_landmark = body.get('addressPermanentNotes') or body.get('currentAddressLandmark') or ''
-    
-    # Permanent Address (official/home address)
-    same_as_current = body.get('sameAsCurrent', False)
-    
+
+    # Permanent Address
+    same_as_current = bool(body.get('sameAsCurrent', False))
     if same_as_current:
-        # Copy current to permanent
         permanent_street = current_street
         permanent_barangay = current_barangay
         permanent_municipality = current_municipality
         permanent_province = current_province
         permanent_region = current_region
         permanent_zip = current_zip
-        permanent_country = current_country
         permanent_notes = current_landmark
     else:
-        # Use separate permanent address fields
         permanent_street = body.get('permanentAddressStreet') or ''
         permanent_barangay = body.get('permanentAddressBarangay') or ''
         permanent_municipality = body.get('permanentAddressMunicipality') or ''
         permanent_province = body.get('permanentAddressProvince') or ''
         permanent_region = body.get('permanentAddressRegion') or ''
         permanent_zip = body.get('permanentAddressZip') or ''
-        permanent_country = body.get('permanentAddressCountry') or 'Philippines'
         permanent_notes = body.get('permanentAddressNotes') or ''
-    
-    # Build full address strings
-    current_address_full = ', '.join([p for p in [
-        current_street, current_barangay, current_municipality, 
-        current_province, current_region, current_country, current_zip
-    ] if p])
-    
-    permanent_address_full = ', '.join([p for p in [
-        permanent_street, permanent_barangay, permanent_municipality, 
-        permanent_province, permanent_region, permanent_country, permanent_zip
-    ] if p])
-    
-    # Legacy address field (defaults to permanent)
-    address = permanent_address_full or current_address_full
-    
-    db = _ensure_users()
-    if student_id in db['users']:
-        return jsonify(error='Student ID already exists'), 400
-    
-    student = {
-        'id': student_id,
-        'studentId': student_id,
-        'userType': 'student',
-        'role': 'student',
-        
-        # Personal Information
-        'firstName': first,
-        'middleName': middle,
-        'lastName': last,
-        'suffix': suffix,
-        'fullName': full,
-        'email': email,
-        'phone': phone,
-        'gender': gender,
-        'birthday': birthday,
-        'age': age,
-        
-        # Academic Information
-        'department': department,
-        'course': course,
-        'year': year,
-        'yearLevel': year,
-        'section': block,
-        'block': block,
-        
-        # Current Address Fields
-        'currentAddressStreet': current_street,
-        'currentAddressBarangay': current_barangay,
-        'currentAddressMunicipality': current_municipality,
-        'currentAddressProvince': current_province,
-        'currentAddressRegion': current_region,
-        'currentAddressZip': current_zip,
-        'currentAddressCountry': current_country,
-        'currentAddressLandmark': current_landmark,
-        'currentAddressFull': current_address_full,
-        
-        # Permanent Address Fields
-        'permanentAddressStreet': permanent_street,
-        'permanentAddressBarangay': permanent_barangay,
-        'permanentAddressMunicipality': permanent_municipality,
-        'permanentAddressProvince': permanent_province,
-        'permanentAddressRegion': permanent_region,
-        'permanentAddressZip': permanent_zip,
-        'permanentAddressCountry': permanent_country,
-        'permanentAddressNotes': permanent_notes,
-        'permanentAddressFull': permanent_address_full,
-        
-        # Address Management
-        'sameAsCurrent': same_as_current,
-        
-        # Legacy address fields (for backward compatibility)
-        'street': current_street,
-        'barangay': current_barangay,
-        'municipality': current_municipality,
-        'province': current_province,
-        'region': current_region,
-        'zipCode': current_zip,
-        'country': current_country,
-        'address': address,
-        'addressPermanent': permanent_address_full,
-        
-        # Security
-        'twoFactorEnabled': False,
-        
-        # System Fields
-        'createdAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-        'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-        'systemTag': 'JRMSU-KCS',
-        'accountStatus': 'active'
-    }
-    
-    db['users'][student_id] = student
-    save_db(db)
-    log_activity(student_id, 'student_register')
-    _emit('students.updated', student_id, student)
-    return jsonify(ok=True, student=student)
+
+    # Password hashing
+    password = (body.get('password') or '').encode('utf-8')
+    if not password:
+        return jsonify(error='Password required'), 400
+    password_hash = bcrypt.hashpw(password, bcrypt.gensalt()).decode('utf-8')
+
+    # Use DB stored procedure
+    try:
+        ok, msg = StudentDB.register_student(
+            student_id=student_id,
+            first_name=first,
+            middle_name=middle,
+            last_name=last,
+            suffix=suffix,
+            birthdate=birthdate,
+            gender=gender,
+            email=email,
+            phone=phone,
+            department=department,
+            course=course,
+            year_level=year_level,
+            current_street=current_street,
+            current_barangay=current_barangay,
+            current_municipality=current_municipality,
+            current_province=current_province,
+            current_region=current_region,
+            current_zip=current_zip,
+            current_landmark=current_landmark,
+            permanent_street=permanent_street,
+            permanent_barangay=permanent_barangay,
+            permanent_municipality=permanent_municipality,
+            permanent_province=permanent_province,
+            permanent_region=permanent_region,
+            permanent_zip=permanent_zip,
+            permanent_notes=permanent_notes,
+            same_as_current=same_as_current,
+            password_hash=password_hash,
+        )
+        if not ok:
+            return jsonify(error=msg or 'Registration failed'), 400
+        # Return fresh student row
+        row = StudentDB.get_student_by_id(student_id) or {}
+        student = _map_student_row_to_user(row)
+        log_activity(student_id, 'student_register')
+        _emit('students.updated', student_id, student)
+        return jsonify(ok=True, student=student, studentId=student_id)
+    except Exception as e:
+        # Fallback to file-backed store if DB not available
+        fdb = _ensure_users()
+        if student_id in fdb['users']:
+            return jsonify(error='Student ID already exists'), 400
+        # Minimal fallback record
+        fallback = {
+            'id': student_id,
+            'studentId': student_id,
+            'userType': 'student',
+            'role': 'student',
+            'firstName': first,
+            'middleName': middle,
+            'lastName': last,
+            'suffix': suffix,
+            'email': email,
+            'phone': phone,
+            'gender': gender,
+            'birthday': birthdate,
+            'age': body.get('age') or '',
+            'department': department,
+            'course': course,
+            'year': year_level,
+            'yearLevel': year_level,
+            'section': block,
+            'block': block,
+            'address': ', '.join([p for p in [current_street, current_barangay, current_municipality, current_province, current_region, 'Philippines', current_zip] if p])
+        }
+        fdb['users'][student_id] = fallback
+        save_db(fdb)
+        log_activity(student_id, 'student_register')
+        _emit('students.updated', student_id, fallback)
+        return jsonify(ok=True, student=fallback, studentId=student_id)
 
 @app.route('/api/students/<student_id>/2fa/setup', methods=['POST'])
 def students_2fa_setup(student_id: str):
@@ -531,16 +558,281 @@ def students_2fa_disable(student_id: str):
 
 @app.route('/api/users/<uid>', methods=['PATCH'])
 def update_user(uid: str):
-    db = load_db()
     body = request.get_json(force=True)
-    users = db.setdefault("users", {})
+    # Try to update admin in MySQL if exists
+    try:
+        arow = AdminDB.get_admin_by_id(uid)
+        if arow:
+            ok, msg = AdminDB.update_admin_profile(
+                admin_id=uid,
+                first_name=body.get('firstName') or arow.get('first_name') or '',
+                middle_name=body.get('middleName') or arow.get('middle_name') or '',
+                last_name=body.get('lastName') or arow.get('last_name') or '',
+                suffix=body.get('suffix') or arow.get('suffix') or '',
+                gender=body.get('gender') or arow.get('gender') or '',
+                age=body.get('age') or arow.get('age') or '',
+                birthdate=body.get('birthdate') or body.get('birthday') or (str(arow.get('birthdate')) if arow.get('birthdate') else ''),
+                email=body.get('email') or arow.get('email') or '',
+                phone=body.get('phone') or arow.get('phone') or '',
+                street=body.get('street') or arow.get('street') or '',
+                barangay=body.get('barangay') or arow.get('barangay') or '',
+                municipality=body.get('municipality') or body.get('city') or arow.get('municipality') or '',
+                province=body.get('province') or arow.get('province') or '',
+                region=body.get('region') or arow.get('region') or '',
+                zip_code=body.get('zipCode') or arow.get('zip_code') or '',
+                current_street=body.get('currentStreet') or arow.get('current_street') or '',
+                current_barangay=body.get('currentBarangay') or arow.get('current_barangay') or '',
+                current_municipality=body.get('currentMunicipality') or arow.get('current_municipality') or '',
+                current_province=body.get('currentProvince') or arow.get('current_province') or '',
+                current_region=body.get('currentRegion') or arow.get('current_region') or '',
+                current_zip=body.get('currentZipCode') or arow.get('current_zip') or '',
+                current_landmark=body.get('currentLandmark') or arow.get('current_landmark') or ''
+            )
+            if not ok:
+                return jsonify(error=msg or 'Update failed'), 400
+            new_row = AdminDB.get_admin_by_id(uid) or {}
+            user = _map_admin_row_to_user(new_row)
+            log_activity(uid, 'profile_update')
+            _emit('user.updated', uid, user)
+            return jsonify(ok=True, user=user)
+    except Exception:
+        pass
+    # Try to update student in MySQL if exists
+    try:
+        row = StudentDB.get_student_by_id(uid)
+        if row:
+            # Only pass editable fields per requirements
+            blk = body.get('block')
+            if not blk and '-' in uid:
+                try:
+                    blk = uid.split('-')[2]
+                except Exception:
+                    blk = ''
+            ok, msg = StudentDB.update_student_profile(
+                student_id=uid,
+                department=(body.get('department') or body.get('college_department') or row.get('department') or ''),
+                course=(body.get('course') or body.get('course_major') or row.get('course') or ''),
+                year_level=(body.get('year') or body.get('year_level') or body.get('yearLevel') or row.get('year_level') or ''),
+                block=blk or (row.get('block') or ''),
+                current_street=body.get('currentStreet') or body.get('street') or row.get('current_address_street') or '',
+                current_barangay=body.get('currentBarangay') or body.get('barangay') or row.get('current_address_barangay') or '',
+                current_municipality=body.get('currentMunicipality') or body.get('municipality') or body.get('city') or row.get('current_address_municipality') or '',
+                current_province=body.get('currentProvince') or body.get('province') or row.get('current_address_province') or '',
+                current_region=body.get('currentRegion') or body.get('region') or row.get('current_address_region') or '',
+                current_zip=body.get('currentZipCode') or body.get('zipCode') or row.get('current_address_zip') or '',
+                current_landmark=body.get('currentLandmark') or row.get('current_address_landmark') or ''
+            )
+            if not ok:
+                return jsonify(error=msg or 'Update failed'), 400
+            new_row = StudentDB.get_student_by_id(uid) or {}
+            user = _map_student_row_to_user(new_row)
+            log_activity(uid, 'profile_update')
+            _emit('user.updated', uid, user)
+            return jsonify(ok=True, user=user)
+    except Exception:
+        pass
+    # Fallback to file-backed update
+    fdb = load_db()
+    users = fdb.setdefault("users", {})
     cur = users.get(uid, {"id": uid})
     cur.update(body or {})
     users[uid] = cur
-    save_db(db)
+    save_db(fdb)
     log_activity(uid, 'profile_update')
     _emit('user.updated', uid, cur)
     return jsonify(ok=True, user=cur)
+
+# ---------- Admin-specific API ----------
+
+@app.route('/api/admins', methods=['GET'])
+def admins_list():
+    try:
+        rows = AdminDB.list_all_admins() or []
+        admins = [_map_admin_row_to_user(r) for r in rows]
+        return jsonify(items=admins)
+    except Exception:
+        # Fallback to file store
+        fdb = load_db()
+        users = list((fdb.get('users') or {}).values())
+        admins = [u for u in users if (u.get('userType') == 'admin' or (u.get('role') in ['admin','assistant','staff','librarian','supervisor']))]
+        return jsonify(items=admins)
+
+@app.route('/api/admins/<admin_id>', methods=['GET'])
+def admins_get(admin_id: str):
+    try:
+        row = AdminDB.get_admin_by_id(admin_id)
+        if not row:
+            return jsonify(error='Admin not found'), 404
+        return jsonify(_map_admin_row_to_user(row))
+    except Exception:
+        fdb = load_db()
+        u = (fdb.get('users') or {}).get(admin_id)
+        if not u or (u.get('userType') != 'admin' and u.get('role') not in ['admin','assistant','staff','librarian','supervisor']):
+            return jsonify(error='Admin not found'), 404
+        return jsonify(u)
+
+@app.route('/api/admins/<admin_id>', methods=['PUT'])
+def admins_put(admin_id: str):
+    body = request.get_json(force=True) or {}
+    # Editable personal/contact/address fields
+    try:
+        # Get existing admin data to fill defaults
+        existing = AdminDB.get_admin_by_id(admin_id) or {}
+        ok, msg = AdminDB.update_admin_profile(
+            admin_id=admin_id,
+            first_name=body.get('firstName') or existing.get('first_name') or '',
+            middle_name=body.get('middleName') or existing.get('middle_name') or '',
+            last_name=body.get('lastName') or existing.get('last_name') or '',
+            suffix=body.get('suffix') or existing.get('suffix') or '',
+            gender=body.get('gender') or existing.get('gender') or '',
+            age=body.get('age') or existing.get('age') or '',
+            birthdate=body.get('birthdate') or body.get('birthday') or (str(existing.get('birthdate')) if existing.get('birthdate') else ''),
+            email=body.get('email') or existing.get('email') or '',
+            phone=body.get('phone') or existing.get('phone') or '',
+            street=body.get('street') or existing.get('street') or '',
+            barangay=body.get('barangay') or existing.get('barangay') or '',
+            municipality=body.get('municipality') or body.get('city') or existing.get('municipality') or '',
+            province=body.get('province') or existing.get('province') or '',
+            region=body.get('region') or existing.get('region') or '',
+            zip_code=body.get('zipCode') or existing.get('zip_code') or '',
+            current_street=body.get('currentStreet') or existing.get('current_street') or '',
+            current_barangay=body.get('currentBarangay') or existing.get('current_barangay') or '',
+            current_municipality=body.get('currentMunicipality') or existing.get('current_municipality') or '',
+            current_province=body.get('currentProvince') or existing.get('current_province') or '',
+            current_region=body.get('currentRegion') or existing.get('current_region') or '',
+            current_zip=body.get('currentZipCode') or existing.get('current_zip') or '',
+            current_landmark=body.get('currentLandmark') or existing.get('current_landmark') or ''
+        )
+        if not ok:
+            return jsonify(error=msg or 'Update failed'), 400
+        row = AdminDB.get_admin_by_id(admin_id) or {}
+        admin = _map_admin_row_to_user(row)
+        log_activity(admin_id, 'profile_update')
+        _emit('admins.updated', admin_id, admin)
+        return jsonify(ok=True, admin=admin)
+    except Exception:
+        # Fallback file store
+        fdb = _ensure_users()
+        u = (fdb.get('users') or {}).get(admin_id)
+        if not u:
+            return jsonify(error='Admin not found'), 404
+        for k in list(body.keys()):
+            u[k] = body[k]
+        fdb['users'][admin_id] = u
+        save_db(fdb)
+        log_activity(admin_id, 'profile_update')
+        _emit('admins.updated', admin_id, u)
+        return jsonify(ok=True, admin=u)
+
+@app.route('/api/admins/register', methods=['POST'])
+def admins_register():
+    body = request.get_json(force=True) or {}
+    admin_id = (body.get('adminId') or body.get('id') or '').strip()
+    if not admin_id:
+        return jsonify(error='Admin ID required'), 400
+
+    # Personal info
+    first = (body.get('firstName') or '').strip()
+    middle = (body.get('middleName') or '').strip()
+    last = (body.get('lastName') or '').strip()
+    suffix = (body.get('suffix') or '').strip()
+    email = (body.get('email') or '').strip().lower()
+    phone = (body.get('phone') or '').strip()
+    gender = (body.get('gender') or '').strip()
+    birthdate = (body.get('birthdate') or body.get('birthday') or '').strip()
+    age = body.get('age') or ''
+    position = (body.get('position') or body.get('role') or 'admin').strip()
+
+    # Permanent Address
+    street = body.get('addressStreet') or body.get('street') or ''
+    barangay = body.get('addressBarangay') or body.get('barangay') or ''
+    municipality = body.get('addressMunicipality') or body.get('municipality') or body.get('city') or ''
+    province = body.get('addressProvince') or body.get('province') or ''
+    region = body.get('addressRegion') or body.get('region') or ''
+    zip_code = body.get('addressZip') or body.get('zipCode') or ''
+    
+    # Current Address
+    current_street = body.get('currentStreet') or body.get('currentAddressStreet') or ''
+    current_barangay = body.get('currentBarangay') or body.get('currentAddressBarangay') or ''
+    current_municipality = body.get('currentMunicipality') or body.get('currentAddressMunicipality') or ''
+    current_province = body.get('currentProvince') or body.get('currentAddressProvince') or ''
+    current_region = body.get('currentRegion') or body.get('currentAddressRegion') or ''
+    current_zip = body.get('currentZipCode') or body.get('currentAddressZip') or ''
+    current_landmark = body.get('currentLandmark') or body.get('addressPermanentNotes') or ''
+    same_as_current = bool(body.get('sameAsCurrent', False))
+
+    # Password
+    password = (body.get('password') or '').encode('utf-8')
+    if not password:
+        return jsonify(error='Password required'), 400
+    password_hash = bcrypt.hashpw(password, bcrypt.gensalt()).decode('utf-8')
+
+    try:
+        ok, msg = AdminDB.register_admin(
+            admin_id=admin_id,
+            first_name=first,
+            middle_name=middle,
+            last_name=last,
+            suffix=suffix,
+            birthdate=birthdate,
+            gender=gender,
+            email=email,
+            phone=phone,
+            position=position,
+            street=street,
+            barangay=barangay,
+            municipality=municipality,
+            province=province,
+            region=region,
+            zip_code=zip_code,
+            current_street=current_street,
+            current_barangay=current_barangay,
+            current_municipality=current_municipality,
+            current_province=current_province,
+            current_region=current_region,
+            current_zip=current_zip,
+            current_landmark=current_landmark,
+            same_as_current=same_as_current,
+            password_hash=password_hash
+        )
+        if not ok:
+            return jsonify(error=msg or 'Registration failed'), 400
+        row = AdminDB.get_admin_by_id(admin_id) or {}
+        admin = _map_admin_row_to_user(row)
+        log_activity(admin_id, 'admin_register')
+        _emit('admins.updated', admin_id, admin)
+        return jsonify(ok=True, admin=admin, adminId=admin_id)
+    except Exception:
+        # Fallback to file store
+        fdb = _ensure_users()
+        if admin_id in fdb['users']:
+            return jsonify(error='Admin ID already exists'), 400
+        fallback = {
+            'id': admin_id,
+            'userType': 'admin',
+            'role': position,
+            'firstName': first,
+            'middleName': middle,
+            'lastName': last,
+            'suffix': suffix,
+            'email': email,
+            'phone': phone,
+            'gender': gender,
+            'birthday': birthdate,
+            'age': age,
+            'address': ', '.join([p for p in [street, barangay, municipality, province, region, 'Philippines', zip_code] if p]),
+            'systemTag': 'JRMSU-KCL',
+            'twoFactorEnabled': False,
+            'qrCodeActive': True,
+            'isActive': True,
+            'createdAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+            'updatedAt': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        }
+        fdb['users'][admin_id] = fallback
+        save_db(fdb)
+        log_activity(admin_id, 'admin_register')
+        _emit('admins.updated', admin_id, fallback)
+        return jsonify(ok=True, admin=fallback, adminId=admin_id)
 
 @app.route('/api/users/<uid>/2fa', methods=['POST'])
 def toggle_2fa(uid: str):
@@ -634,6 +926,109 @@ def _emit(event: str, user_id: str, payload: dict):
 def _new_notif_id():
     return f"notif-{uuid.uuid4()}"
 
+# ---- Mapping helper ----
+def _map_student_row_to_user(r: dict) -> dict:
+    """Map MySQL students row to frontend user structure used across pages."""
+    if not r:
+        return {}
+    # Prefer stable keys from schema and expose aliases expected by UI
+    out = {
+        'id': r.get('student_id') or r.get('id'),
+        'studentId': r.get('student_id') or r.get('id'),
+        'userType': 'student',
+        'role': 'student',
+        'firstName': r.get('first_name'),
+        'middleName': r.get('middle_name'),
+        'lastName': r.get('last_name'),
+        'suffix': r.get('suffix') or '',
+        'fullName': r.get('full_name'),
+        'email': r.get('email'),
+        'phone': r.get('phone'),
+        'gender': r.get('gender'),
+        'birthday': str(r.get('birthdate')) if r.get('birthdate') is not None else '',
+        'age': r.get('age'),
+        'department': r.get('department'),
+        'course': r.get('course'),
+        'year': r.get('year_level'),
+        'yearLevel': r.get('year_level'),
+        'section': r.get('block'),
+        'block': r.get('block'),
+        # Permanent address (display/legacy)
+        'address': r.get('permanent_address_full') or r.get('current_address_full') or '',
+        'region': r.get('permanent_address_region') or '',
+        'province': r.get('permanent_address_province') or '',
+        'municipality': r.get('permanent_address_municipality') or '',
+        'barangay': r.get('permanent_address_barangay') or '',
+        'street': r.get('permanent_address_street') or '',
+        'zipCode': r.get('permanent_address_zip') or '',
+        # Current address (student-editable section)
+        'currentAddress': r.get('current_address_full') or '',
+        'currentRegion': r.get('current_address_region') or '',
+        'currentProvince': r.get('current_address_province') or '',
+        'currentMunicipality': r.get('current_address_municipality') or '',
+        'currentBarangay': r.get('current_address_barangay') or '',
+        'currentStreet': r.get('current_address_street') or '',
+        'currentZipCode': r.get('current_address_zip') or '',
+        'twoFactorEnabled': bool(r.get('two_factor_enabled')),
+        'systemTag': r.get('system_tag') or 'JRMSU-KCS',
+        'accountStatus': r.get('account_status') or 'active',
+    }
+    return out
+
+def _map_admin_row_to_user(r: dict) -> dict:
+    """Map MySQL admins row to frontend user structure."""
+    if not r:
+        return {}
+    out = {
+        'id': r.get('admin_id') or r.get('id'),
+        'userType': 'admin',
+        'role': r.get('position') or 'admin',
+        'position': r.get('position') or 'admin',
+        'firstName': r.get('first_name'),
+        'middleName': r.get('middle_name'),
+        'lastName': r.get('last_name'),
+        'suffix': r.get('suffix') or '',
+        'fullName': r.get('full_name') or ' '.join([x for x in [r.get('first_name'), r.get('last_name')] if x]),
+        'email': r.get('email'),
+        'phone': r.get('phone'),
+        'gender': r.get('gender'),
+        'birthday': str(r.get('birthdate')) if r.get('birthdate') is not None else '',
+        'age': r.get('age'),
+        'department': r.get('department') or '',
+        'course': '',
+        'year': '',
+        'yearLevel': '',
+        'section': '',
+        'block': '',
+        # Permanent Address
+        'address': r.get('address') or ', '.join([p for p in [r.get('street'), r.get('barangay'), r.get('municipality'), r.get('province'), r.get('region'), 'Philippines', r.get('zip_code')] if p]),
+        'region': r.get('region') or '',
+        'province': r.get('province') or '',
+        'municipality': r.get('municipality') or '',
+        'barangay': r.get('barangay') or '',
+        'street': r.get('street') or '',
+        'zipCode': r.get('zip_code') or '',
+        # Current Address
+        'currentAddress': r.get('current_address') or ', '.join([p for p in [r.get('current_street'), r.get('current_barangay'), r.get('current_municipality'), r.get('current_province'), r.get('current_region'), 'Philippines', r.get('current_zip')] if p]),
+        'currentRegion': r.get('current_region') or '',
+        'currentProvince': r.get('current_province') or '',
+        'currentMunicipality': r.get('current_municipality') or '',
+        'currentBarangay': r.get('current_barangay') or '',
+        'currentStreet': r.get('current_street') or '',
+        'currentZipCode': r.get('current_zip') or '',
+        'currentLandmark': r.get('current_landmark') or '',
+        'sameAsCurrent': bool(r.get('same_as_current')),
+        # System fields
+        'twoFactorEnabled': bool(r.get('two_factor_enabled')),
+        'systemTag': r.get('system_tag') or 'JRMSU-KCL',
+        'accountStatus': r.get('account_status') or 'active',
+        'isActive': (r.get('account_status') or 'active') == 'active',
+        'qrCodeActive': True,
+        'createdAt': r.get('created_at') or '',
+        'updatedAt': r.get('updated_at') or '',
+    }
+    return out
+
 @app.route('/ai/health')
 def ai_health():
     try:
@@ -719,7 +1114,10 @@ def auth_request_reset():
         code = f"{int(time.time())%1000000:06d}"
         expires_at = int(time.time()) + 300  # 5 minutes
         RESET_CODES[email] = { 'code': code, 'expires_at': expires_at, 'user_id': user_id, 'full_name': full_name }
-        print(f"[MAIL] Reset code for {email}: {code} (expires in 5m)")
+        
+        # Send actual email (or print to console in dev mode)
+        email_sent = send_reset_email(email, code, full_name)
+        
         # Push a notification to user (dev)
         if user_id:
             lst = _ensure_user_store(user_id)
@@ -984,6 +1382,14 @@ def qr_validate():
     except Exception as e:
         return jsonify(valid=False, error=str(e)), 400
 
+
+# Register library entry/exit endpoints
+try:
+    from library_endpoints import register_library_endpoints
+    register_library_endpoints(app)
+    print('✅ Library endpoints loaded')
+except Exception as e:
+    print(f'⚠️  Library endpoints not loaded: {e}')
 
 if __name__ == '__main__':
     print('🚀 Backend running at http://localhost:5000')

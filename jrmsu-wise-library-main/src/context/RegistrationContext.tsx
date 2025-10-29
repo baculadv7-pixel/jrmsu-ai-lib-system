@@ -39,6 +39,15 @@ export interface RegistrationData {
   permanentAddressCountry?: string;
   permanentAddressZip?: string;
   
+  // Current Address fields (for admin)
+  currentStreet?: string;
+  currentBarangay?: string;
+  currentMunicipality?: string;
+  currentProvince?: string;
+  currentRegion?: string;
+  currentZipCode?: string;
+  currentLandmark?: string;
+  
   // Institutional (student)
   department?: string;
   course?: string;

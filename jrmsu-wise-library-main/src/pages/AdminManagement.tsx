@@ -44,9 +44,30 @@ const AdminManagement = () => {
   const [filterRole, setFilterRole] = useState<string>("all");
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
+  // Library session tracking
+  const [activeLibraryAdmins, setActiveLibraryAdmins] = useState<number>(0);
+
+  // Load active library sessions
+  const loadActiveLibrarySessions = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/library/active-sessions?userType=admin');
+      if (response.ok) {
+        const data = await response.json();
+        setActiveLibraryAdmins(data.admins || 0);
+      }
+    } catch (error) {
+      console.error('Failed to load active library sessions:', error);
+    }
+  };
+
   // Load admins from database and backend
   useEffect(() => {
     loadAdmins();
+    loadActiveLibrarySessions();
+    
+    // Poll for active sessions every 30 seconds
+    const sessionInterval = setInterval(loadActiveLibrarySessions, 30000);
+    
     let t: any = null;
     const tick = async () => {
       try {
@@ -229,13 +250,13 @@ const AdminManagement = () => {
               <Card className="shadow-jrmsu">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Active Admins
+                    Active Admins (In Library)
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-2">
                     <Badge className="bg-green-600 h-5" />
-                    <span className="text-3xl font-bold text-green-600">{admins.filter(a => a.isActive).length}</span>
+                    <span className="text-3xl font-bold text-green-600">{activeLibraryAdmins}</span>
                   </div>
                 </CardContent>
               </Card>

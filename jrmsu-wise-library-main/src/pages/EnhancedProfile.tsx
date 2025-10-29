@@ -60,13 +60,13 @@ const EnhancedProfile = () => {
     permanentZipCode: (user as any)?.zipCode || "",
     
     // Address fields - Current (for admin)
-    currentRegion: "",
-    currentProvince: "",
-    currentMunicipality: "",
-    currentBarangay: "",
-    currentStreet: "",
-    currentZipCode: "",
-    currentLandmark: ""
+    currentRegion: userType === "admin" ? (user as any)?.currentRegion || "" : "",
+    currentProvince: userType === "admin" ? (user as any)?.currentProvince || "" : "",
+    currentMunicipality: userType === "admin" ? (user as any)?.currentMunicipality || "" : "",
+    currentBarangay: userType === "admin" ? (user as any)?.currentBarangay || "" : "",
+    currentStreet: userType === "admin" ? (user as any)?.currentStreet || "" : "",
+    currentZipCode: userType === "admin" ? (user as any)?.currentZipCode || "" : "",
+    currentLandmark: userType === "admin" ? (user as any)?.currentLandmark || "" : ""
   });
 
   useEffect(() => {
@@ -80,12 +80,38 @@ const EnhancedProfile = () => {
               try { updateUser(r); } catch {}
               setFormData(prev => ({
                 ...prev,
+                // Personal information
+                firstName: r.firstName ?? prev.firstName,
+                middleName: r.middleName ?? prev.middleName,
+                lastName: r.lastName ?? prev.lastName,
+                suffix: r.suffix ?? prev.suffix,
+                gender: r.gender ?? prev.gender,
+                age: r.age ?? prev.age,
+                birthday: r.birthday ?? prev.birthday,
+                email: r.email ?? prev.email,
+                contactNumber: r.phone ?? r.contact ?? prev.contactNumber,
+                // Academic information (students)
                 department: r.department ?? prev.department,
                 course: r.course ?? prev.course,
                 yearLevel: r.year ?? prev.yearLevel,
                 block: r.section ?? prev.block,
                 currentAddress: r.address ?? prev.currentAddress,
                 profilePicture: r.profilePicture ?? prev.profilePicture,
+                // Permanent address
+                permanentRegion: r.region ?? prev.permanentRegion,
+                permanentProvince: r.province ?? prev.permanentProvince,
+                permanentMunicipality: r.municipality ?? prev.permanentMunicipality,
+                permanentBarangay: r.barangay ?? prev.permanentBarangay,
+                permanentStreet: r.street ?? prev.permanentStreet,
+                permanentZipCode: r.zipCode ?? prev.permanentZipCode,
+                // Current address
+                currentRegion: r.currentRegion ?? prev.currentRegion,
+                currentProvince: r.currentProvince ?? prev.currentProvince,
+                currentMunicipality: r.currentMunicipality ?? prev.currentMunicipality,
+                currentBarangay: r.currentBarangay ?? prev.currentBarangay,
+                currentStreet: r.currentStreet ?? prev.currentStreet,
+                currentZipCode: r.currentZipCode ?? prev.currentZipCode,
+                currentLandmark: r.currentLandmark ?? prev.currentLandmark,
               }));
             }
           } catch {}
@@ -110,24 +136,27 @@ const EnhancedProfile = () => {
     }
   }, [user?.id, user?.role]);
 
-  // Build user data from authenticated session (no mock values)
+  // Build user data from authenticated session and formData (prioritize formData after backend load)
   const userData = {
-    firstName: user?.firstName || '',
-    middleName: user?.middleName || '',
-    lastName: user?.lastName || '',
-    suffix: '',
-    gender: (user as any)?.gender || '',
-    birthday: (user as any)?.birthday || '',
-    age: (user as any)?.age || '',
+    firstName: formData.firstName || user?.firstName || '',
+    middleName: formData.middleName || user?.middleName || '',
+    lastName: formData.lastName || user?.lastName || '',
+    suffix: formData.suffix || (user as any)?.suffix || '',
+    gender: formData.gender || (user as any)?.gender || '',
+    birthday: formData.birthday || (user as any)?.birthday || '',
+    age: formData.age || (user as any)?.age || '',
     id: user?.id || '',
     // Position/job title for admin: fallback to role if position missing
     position: userType === 'admin' ? (((user as any)?.position) || (user as any)?.role || '') : undefined,
-    email: user?.email || '',
-    contact: (user as any)?.phone || (user as any)?.contact || '',
+    email: formData.email || user?.email || '',
+    contact: formData.contactNumber || (user as any)?.phone || (user as any)?.contact || '',
+    // Student department
+    department: formData.department || (user as any)?.department || '',
     street: (user as any)?.street || '',
     barangay: (user as any)?.barangay || '',
     municipality: (user as any)?.municipality || '',
     province: (user as any)?.province || '',
+    region: (user as any)?.region || '',
     country: (user as any)?.country || '',
     zipCode: (user as any)?.zipCode || '',
     addressFull: (user as any)?.address || ''
@@ -168,29 +197,38 @@ const handleSave = async () => {
     if (!user?.id) return;
     
     const updates: any = {
-      // Student fields
+      // Common personal fields (editable for both student and admin)
+      firstName: formData.firstName,
+      middleName: formData.middleName,
+      lastName: formData.lastName,
+      suffix: formData.suffix,
+      gender: formData.gender,
+      age: formData.age,
+      birthday: formData.birthday,
+      email: formData.email,
+      phone: formData.contactNumber,
+      contact: formData.contactNumber,
+      // Student academic fields
       department: formData.department,
       course: formData.course,
       year: formData.yearLevel,
       section: formData.block,
       address: formData.currentAddress,
       profilePicture: formData.profilePicture,
+      // Current address (editable for both)
+      currentRegion: formData.currentRegion,
+      currentProvince: formData.currentProvince,
+      currentMunicipality: formData.currentMunicipality,
+      currentBarangay: formData.currentBarangay,
+      currentStreet: formData.currentStreet,
+      currentZipCode: formData.currentZipCode,
+      currentLandmark: formData.currentLandmark,
     };
     
     // Admin-specific fields
     if (userType === "admin") {
-      updates.firstName = formData.firstName;
-      updates.middleName = formData.middleName;
-      updates.lastName = formData.lastName;
-      updates.suffix = formData.suffix;
-      updates.gender = formData.gender;
-      updates.age = formData.age;
-      updates.birthday = formData.birthday;
-      updates.email = formData.email;
-      updates.phone = formData.contactNumber;
-      updates.contact = formData.contactNumber;
       
-      // Address fields
+      // Permanent Address fields
       updates.region = formData.permanentRegion;
       updates.province = formData.permanentProvince;
       updates.municipality = formData.permanentMunicipality;
@@ -198,23 +236,14 @@ const handleSave = async () => {
       updates.street = formData.permanentStreet;
       updates.zipCode = formData.permanentZipCode;
       
-      // Current address (build complete string)
-      const currentAddressParts = [
-        formData.currentStreet,
-        formData.currentBarangay,
-        formData.currentMunicipality,
-        formData.currentProvince,
-        formData.currentRegion,
-        'Philippines',
-        formData.currentZipCode
-      ].filter(Boolean);
-      
-      if (currentAddressParts.length > 0) {
-        updates.currentAddress = currentAddressParts.join(', ');
-        if (formData.currentLandmark) {
-          updates.currentAddress += ` (${formData.currentLandmark})`;
-        }
-      }
+      // Current Address fields (individual for backend)
+      updates.currentRegion = formData.currentRegion;
+      updates.currentProvince = formData.currentProvince;
+      updates.currentMunicipality = formData.currentMunicipality;
+      updates.currentBarangay = formData.currentBarangay;
+      updates.currentStreet = formData.currentStreet;
+      updates.currentZipCode = formData.currentZipCode;
+      updates.currentLandmark = formData.currentLandmark;
       
       // Update full name
       const fullNameParts = [formData.firstName, formData.middleName, formData.lastName, formData.suffix].filter(Boolean);
@@ -505,7 +534,7 @@ setQrEnvelope(resp.envelope);
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Birthday</Label>
-                      {isEditing && userType === "admin" ? (
+                      {isEditing ? (
                         <Input 
                           type="date"
                           value={formData.birthday || userData.birthday}
@@ -515,13 +544,13 @@ setQrEnvelope(resp.envelope);
                       ) : (
                         <>
                           <p className="font-medium p-2 bg-muted/50 rounded">{userData.birthday}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{userType === "admin" ? "Editable" : "Read-only"}</p>
+                          <p className="text-xs text-muted-foreground mt-1">Editable</p>
                         </>
                       )}
                     </div>
                     <div>
                       <Label className="text-muted-foreground">Email Address</Label>
-                      {isEditing && userType === "admin" ? (
+                      {isEditing ? (
                         <Input 
                           type="email"
                           value={formData.email || userData.email}
@@ -531,7 +560,7 @@ setQrEnvelope(resp.envelope);
                       ) : (
                         <>
                           <p className="font-medium p-2 bg-muted/50 rounded">{userData.email}</p>
-                          <p className="text-xs text-muted-foreground mt-1">{userType === "admin" ? "Editable" : "Read-only"}</p>
+                          <p className="text-xs text-muted-foreground mt-1">Editable</p>
                         </>
                       )}
                     </div>
@@ -573,7 +602,7 @@ setQrEnvelope(resp.envelope);
                           </SelectContent>
                         </Select>
                       ) : (
-                        <p className="font-medium p-2 bg-white/70 rounded border">{formData.department}</p>
+                        <p className="font-medium p-2 bg-white/70 rounded border">{formData.department || userData.department || 'Not specified'}</p>
                       )}
                     </div>
                     <div className="space-y-2">
@@ -681,7 +710,7 @@ setQrEnvelope(resp.envelope);
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div>
                     <Label className="text-muted-foreground">Contact Number</Label>
-                    {isEditing && userType === "admin" ? (
+                    {isEditing ? (
                       <Input 
                         type="tel"
                         value={formData.contactNumber || userData.contact}
@@ -692,7 +721,7 @@ setQrEnvelope(resp.envelope);
                     ) : (
                       <>
                         <p className="font-medium p-2 bg-muted/50 rounded">{userData.contact}</p>
-                        <p className="text-xs text-muted-foreground mt-1">{userType === "admin" ? "Editable" : "Read-only"}</p>
+                        <p className="text-xs text-muted-foreground mt-1">Editable</p>
                       </>
                     )}
                   </div>
@@ -714,7 +743,7 @@ setQrEnvelope(resp.envelope);
                 {/* Permanent Address */}
                 <div className="space-y-2">
                   <Label>Permanent Address</Label>
-                  {isEditing && userType === "admin" ? (
+                  {isEditing ? (
                     <div className="space-y-2">
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                         <Input
@@ -768,7 +797,7 @@ setQrEnvelope(resp.envelope);
                       {userData.addressFull || [userData.street, userData.barangay, userData.municipality, userData.province, userData.region, userData.country, userData.zipCode].filter(Boolean).join(', ') || 'No permanent address on file'}
                     </p>
                   )}
-                  <p className="text-xs text-muted-foreground mt-1">{userType === "admin" ? "Editable" : "Read-only"}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Editable</p>
                 </div>
                 
                 {/* Current Address Section for Admin */}
@@ -835,23 +864,75 @@ setQrEnvelope(resp.envelope);
                       </div>
                     ) : (
                       <p className="font-medium p-2 bg-white/70 rounded border">
-                        {formData.currentAddress || 'No current address specified'}
+                        {(user as any)?.currentAddress || [formData.currentStreet, formData.currentBarangay, formData.currentMunicipality, formData.currentProvince, formData.currentRegion, 'Philippines', formData.currentZipCode, formData.currentLandmark].filter(Boolean).join(', ') || 'No current address specified'}
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground mt-1">Editable</p>
                   </div>
                 )}
                 
-                {/* Current Address for Student (existing logic) */}
+                {/* Current Address for Student - Enhanced */}
                 {userType === "student" && (
                   <div className="space-y-2">
                     <Label>Current Address</Label>
                     {isEditing ? (
-                      <Input
-                        value={formData.currentAddress}
-                        onChange={(e) => setFormData(prev => ({ ...prev, currentAddress: e.target.value }))}
-                        className="bg-white/70"
-                      />
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          <Input
+                            placeholder="Region"
+                            value={formData.currentRegion || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentRegion: e.target.value }))}
+                            className="text-sm bg-white/70"
+                          />
+                          <Input
+                            placeholder="Province"
+                            value={formData.currentProvince || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentProvince: e.target.value }))}
+                            className="text-sm bg-white/70"
+                          />
+                          <Input
+                            placeholder="Municipality/City"
+                            value={formData.currentMunicipality || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentMunicipality: e.target.value }))}
+                            className="text-sm bg-white/70"
+                          />
+                          <Input
+                            placeholder="Country"
+                            value="Philippines"
+                            disabled
+                            className="text-sm bg-muted/50"
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <Input
+                            placeholder="Barangay"
+                            value={formData.currentBarangay || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentBarangay: e.target.value }))}
+                            className="text-sm bg-white/70"
+                          />
+                          <Input
+                            placeholder="Street (Optional)"
+                            value={formData.currentStreet || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentStreet: e.target.value }))}
+                            className="text-sm bg-white/70"
+                          />
+                          <Input
+                            placeholder="Zip Code"
+                            value={formData.currentZipCode || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentZipCode: e.target.value.replace(/\D/g, '').slice(0, 4) }))}
+                            className="text-sm bg-white/70"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-sm">Landmark / Notes (Optional)</Label>
+                          <Input
+                            placeholder="near the church, in front of a sari-sari store"
+                            value={formData.currentLandmark || ''}
+                            onChange={(e) => setFormData(prev => ({ ...prev, currentLandmark: e.target.value }))}
+                            className="text-sm bg-white/70"
+                          />
+                        </div>
+                      </div>
                     ) : (
                       <p className="font-medium p-2 bg-white/70 rounded border">
                         {formData.currentAddress || 'No current address specified'}

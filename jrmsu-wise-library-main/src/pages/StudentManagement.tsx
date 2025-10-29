@@ -30,10 +30,31 @@ const StudentManagement = () => {
   const [filterCourse, setFilterCourse] = useState<string>("all");
   const [filterYear, setFilterYear] = useState<string>("all");
   const [filterSection, setFilterSection] = useState<string>("all");
+  
+  // Library session tracking
+  const [activeLibraryStudents, setActiveLibraryStudents] = useState<number>(0);
+
+  // Load active library sessions
+  const loadActiveLibrarySessions = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/library/active-sessions?userType=student');
+      if (response.ok) {
+        const data = await response.json();
+        setActiveLibraryStudents(data.students || 0);
+      }
+    } catch (error) {
+      console.error('Failed to load active library sessions:', error);
+    }
+  };
 
   // Load students from database and backend
   useEffect(() => {
     loadStudents();
+    loadActiveLibrarySessions();
+    
+    // Poll for active sessions every 30 seconds
+    const sessionInterval = setInterval(loadActiveLibrarySessions, 30000);
+    
     let t: any = null;
     const tick = async () => {
       try {
@@ -207,17 +228,16 @@ const StudentManagement = () => {
               <Card className="shadow-jrmsu">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Active Students
+                    Active Students (In Library)
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-2">
                     <Badge className="bg-green-600 h-5" />
-                    <span className="text-3xl font-bold">{students.filter(s => s.isActive).length}</span>
+                    <span className="text-3xl font-bold text-green-600">{activeLibraryStudents}</span>
                   </div>
                 </CardContent>
-              </Card>
-              <Card className="shadow-jrmsu">
+              </Card>              <Card className="shadow-jrmsu">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     QR Active
