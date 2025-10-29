@@ -22,6 +22,7 @@ interface LibrarySessionContextValue {
   createSession: (userId: string, userType: 'student' | 'admin', fullName: string, loginMethod?: 'manual' | 'qr') => Promise<void>;
   endSession: () => Promise<void>;
   checkUserStatus: (userId: string) => Promise<{ hasReservations: boolean; hasBorrowedBooks: boolean; reservedBooks: any[]; borrowedBooks: any[] }>;
+  checkUserSessionStatus: (userId: string) => Promise<boolean>;
   borrowBook: (bookId: string) => Promise<void>;
   returnBook: (bookId: string) => Promise<void>;
   cancelReservation: (bookId: string) => Promise<void>;
@@ -254,11 +255,34 @@ export function LibrarySessionProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const checkUserSessionStatus = async (userId: string): Promise<boolean> => {
+    try {
+      // Check if the current session matches the user ID
+      if (session && session.userId === userId && session.status === 'active') {
+        return true;
+      }
+
+      // Query backend to check if this user has an active session
+      const response = await fetch(`${API_BASE}/api/library/check-session/${userId}`);
+      
+      if (!response.ok) {
+        return false;
+      }
+
+      const data = await response.json();
+      return data.hasActiveSession === true;
+    } catch (error) {
+      console.error('❌ Failed to check user session status:', error);
+      return false;
+    }
+  };
+
   const value: LibrarySessionContextValue = {
     session,
     createSession,
     endSession,
     checkUserStatus,
+    checkUserSessionStatus,
     borrowBook,
     returnBook,
     cancelReservation,

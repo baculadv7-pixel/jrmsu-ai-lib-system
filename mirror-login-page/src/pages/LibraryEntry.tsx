@@ -28,7 +28,7 @@ const Login = () => {
   const { toast } = useToast();
   const { isVisible, userData, showWelcome, hideWelcome } = useWelcomeMessage();
   // Library session management
-  const { session, createSession, checkUserStatus, borrowBook, returnBook, endSession } = useLibrarySession();
+  const { session, createSession, checkUserStatus, checkUserSessionStatus, borrowBook, returnBook, endSession } = useLibrarySession();
   const [showPassword, setShowPassword] = useState(false);
   const [isUserLoggedInLibrary, setIsUserLoggedInLibrary] = useState(false);
   const [userType, setUserType] = useState<"student" | "admin">("student");
@@ -59,28 +59,56 @@ const Login = () => {
   const [userBorrowedBooks, setUserBorrowedBooks] = useState<any[]>([]);
   const [currentBookToScan, setCurrentBookToScan] = useState<string | null>(null);
 
-  // Check if current user has active library session
+  // Check if the SPECIFIC typed user ID has an active library session
   useEffect(() => {
-    console.log('🔍 Session check:', {
-      hasSession: !!session,
-      status: session?.status,
-      userId: session?.userId,
-      isActive: session?.status === 'active'
-    });
-    
-    // Check if there's an active session regardless of formData
-    if (session && session.status === 'active') {
-      console.log('✅ Active session detected - showing LOGOUT button');
-      setIsUserLoggedInLibrary(true);
-      // Auto-fill the ID field if it's empty
-      if (!formData.id && session.userId) {
-        setFormData(prev => ({ ...prev, id: session.userId }));
+    const checkTypedUserSession = async () => {
+      // If no ID is typed yet, show blue LOGIN button
+      if (!formData.id || formData.id.trim() === '') {
+        console.log('❌ No ID typed - showing blue LOGIN button');
+        setIsUserLoggedInLibrary(false);
+        return;
       }
-    } else {
-      console.log('❌ No active session - showing LOGIN button');
-      setIsUserLoggedInLibrary(false);
-    }
-  }, [session]);
+
+      // First check local session from context
+      if (session && session.status === 'active' && session.userId === formData.id) {
+        console.log('✅ Typed ID matches local active session (context) - showing green LOGOUT button');
+        setIsUserLoggedInLibrary(true);
+        return;
+      }
+
+      // Also check localStorage directly (in case context hasn't updated yet)
+      try {
+        const savedSession = localStorage.getItem('library_session');
+        if (savedSession) {
+          const parsed = JSON.parse(savedSession);
+          if (parsed.status === 'active' && parsed.userId === formData.id) {
+            console.log('✅ Typed ID matches local active session (localStorage) - showing green LOGOUT button');
+            setIsUserLoggedInLibrary(true);
+            return;
+          }
+        }
+      } catch (e) {
+        console.error('Error checking localStorage session:', e);
+      }
+
+      // Then check backend for this specific user
+      try {
+        const hasActiveSession = await checkUserSessionStatus(formData.id);
+        if (hasActiveSession) {
+          console.log('✅ Typed ID has active session (backend) - showing green LOGOUT button');
+          setIsUserLoggedInLibrary(true);
+        } else {
+          console.log('❌ Typed ID has no active session - showing blue LOGIN button');
+          setIsUserLoggedInLibrary(false);
+        }
+      } catch (error) {
+        console.error('Error checking session status:', error);
+        setIsUserLoggedInLibrary(false);
+      }
+    };
+
+    checkTypedUserSession();
+  }, [session, formData.id, checkUserSessionStatus]);
 
   const adminIdRegex = /^KCL-\d{5}$/;
   const studentIdRegex = /^KC-\d{2}-[A-D]-\d{5}$/; // enforce exactly 5 digits at the end
@@ -337,6 +365,9 @@ const Login = () => {
                     const cleaned = sanitize(raw);
                     const next = userType === "student" ? enforceStudentPrefix(cleaned) : cleaned;
                     setFormData({ ...formData, id: next });
+                    
+                    // Check if this specific user has an active session
+                    // This will trigger the useEffect to update button state
                   }}
                   onBlur={() => setIdTouched(true)}
                   required
@@ -408,7 +439,7 @@ const Login = () => {
               )}
 
               <p className="text-xs text-muted-foreground text-center">
-                Don’t have an account? <a href="/register" className="text-primary hover:underline">Register here</a>
+                Don’t have an account? <a href="http://localhost:8080/register" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">Register here</a>
               </p>
             </form>
           ) : (

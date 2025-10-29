@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Download, TrendingUp, BookOpen, Users, AlertCircle } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
@@ -10,11 +11,14 @@ import { BorrowService } from "@/services/borrow";
 import { BooksService } from "@/services/books";
 import { useEffect, useMemo, useState } from "react";
 import { StatsService, type LiveStats } from "@/services/stats";
+import { useToast } from "@/hooks/use-toast";
 
 const Reports = () => {
   const userType: "student" | "admin" = "admin";
-  const [reportType, setReportType] = useState("all");
+  const { toast } = useToast();
+  const [reportType, setReportType] = useState("circulation");
   const [live, setLive] = useState<LiveStats>(StatsService.get());
+  const [showNoDataModal, setShowNoDataModal] = useState(false);
   useEffect(() => {
     const unsub = StatsService.subscribe(setLive);
     StatsService.start(3000);
@@ -138,9 +142,45 @@ const Reports = () => {
                     variant="outline"
                     className="gap-2"
                     onClick={() => {
-                      if (reportType === "circulation") exportToPDF("Circulation Report", circulationRows, "circulation.pdf");
-                      else if (reportType === "inventory") exportToPDF("Inventory Report", inventoryRows, "inventory.pdf");
-                      else if (reportType === "overdue") exportToPDF("Overdue Report", overdueRows, "overdue.pdf");
+                      try {
+                        let reportName = "Circulation Report";
+                        let fileName = "circulation.pdf";
+                        let data = circulationRows;
+                        
+                        if (reportType === "circulation") {
+                          reportName = "Circulation Report";
+                          fileName = "circulation.pdf";
+                          data = circulationRows;
+                        } else if (reportType === "inventory") {
+                          reportName = "Inventory Report";
+                          fileName = "inventory.pdf";
+                          data = inventoryRows;
+                        } else if (reportType === "overdue") {
+                          reportName = "Overdue Report";
+                          fileName = "overdue.pdf";
+                          data = overdueRows;
+                        }
+                        
+                        if (data.length === 0) {
+                          setShowNoDataModal(true);
+                          return;
+                        }
+                        
+                        console.log(`Exporting PDF: ${reportName}, Rows: ${data.length}`);
+                        exportToPDF(reportName, data, fileName);
+                        
+                        toast({
+                          title: "PDF Exported",
+                          description: `${reportName} has been downloaded successfully.`,
+                        });
+                      } catch (error) {
+                        console.error('PDF export error:', error);
+                        toast({
+                          title: "Export Failed",
+                          description: "Failed to export PDF. Please try again.",
+                          variant: "destructive"
+                        });
+                      }
                     }}
                   >
                     <Download className="h-4 w-4" />
@@ -150,9 +190,45 @@ const Reports = () => {
                   <Button
                     className="gap-2"
                     onClick={() => {
-                      if (reportType === "circulation") exportToXLSX("Circulation", circulationRows, "circulation.xlsx");
-                      else if (reportType === "inventory") exportToXLSX("Inventory", inventoryRows, "inventory.xlsx");
-                      else if (reportType === "overdue") exportToXLSX("Overdue", overdueRows, "overdue.xlsx");
+                      try {
+                        let sheetName = "Circulation";
+                        let fileName = "circulation.xlsx";
+                        let data = circulationRows;
+                        
+                        if (reportType === "circulation") {
+                          sheetName = "Circulation";
+                          fileName = "circulation.xlsx";
+                          data = circulationRows;
+                        } else if (reportType === "inventory") {
+                          sheetName = "Inventory";
+                          fileName = "inventory.xlsx";
+                          data = inventoryRows;
+                        } else if (reportType === "overdue") {
+                          sheetName = "Overdue";
+                          fileName = "overdue.xlsx";
+                          data = overdueRows;
+                        }
+                        
+                        if (data.length === 0) {
+                          setShowNoDataModal(true);
+                          return;
+                        }
+                        
+                        console.log(`Exporting Excel: ${sheetName}, Rows: ${data.length}`);
+                        exportToXLSX(sheetName, data, fileName);
+                        
+                        toast({
+                          title: "Excel Exported",
+                          description: `${sheetName} report has been downloaded successfully.`,
+                        });
+                      } catch (error) {
+                        console.error('Excel export error:', error);
+                        toast({
+                          title: "Export Failed",
+                          description: "Failed to export Excel. Please try again.",
+                          variant: "destructive"
+                        });
+                      }
                     }}
                   >
                     Export Excel
@@ -267,6 +343,28 @@ const Reports = () => {
           </div>
         </main>
       </div>
+
+      {/* No Data Modal */}
+      <Dialog open={showNoDataModal} onOpenChange={setShowNoDataModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>No Data Available</DialogTitle>
+            <DialogDescription>
+              There is no data to export for the selected report type yet.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="text-center py-6">
+            <p className="text-muted-foreground">
+              {reportType === 'circulation' && 'Circulation data will appear once books are borrowed.'}
+              {reportType === 'inventory' && 'Inventory data will appear once books are added to the system.'}
+              {reportType === 'overdue' && 'Overdue data will appear when borrowed books pass their due date.'}
+            </p>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => setShowNoDataModal(false)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AIAssistant />
     </div>

@@ -614,13 +614,20 @@ def update_user(uid: str):
                 course=(body.get('course') or body.get('course_major') or row.get('course') or ''),
                 year_level=(body.get('year') or body.get('year_level') or body.get('yearLevel') or row.get('year_level') or ''),
                 block=blk or (row.get('block') or ''),
-                current_street=body.get('currentStreet') or body.get('street') or row.get('current_address_street') or '',
-                current_barangay=body.get('currentBarangay') or body.get('barangay') or row.get('current_address_barangay') or '',
-                current_municipality=body.get('currentMunicipality') or body.get('municipality') or body.get('city') or row.get('current_address_municipality') or '',
-                current_province=body.get('currentProvince') or body.get('province') or row.get('current_address_province') or '',
-                current_region=body.get('currentRegion') or body.get('region') or row.get('current_address_region') or '',
-                current_zip=body.get('currentZipCode') or body.get('zipCode') or row.get('current_address_zip') or '',
-                current_landmark=body.get('currentLandmark') or row.get('current_address_landmark') or ''
+                permanent_street=body.get('permanent_address_street') or row.get('permanent_address_street') or '',
+                permanent_barangay=body.get('permanent_address_barangay') or row.get('permanent_address_barangay') or '',
+                permanent_municipality=body.get('permanent_address_municipality') or row.get('permanent_address_municipality') or '',
+                permanent_province=body.get('permanent_address_province') or row.get('permanent_address_province') or '',
+                permanent_region=body.get('permanent_address_region') or row.get('permanent_address_region') or '',
+                permanent_zip=body.get('permanent_address_zip') or row.get('permanent_address_zip') or '',
+                current_street=body.get('current_address_street') or body.get('currentStreet') or body.get('street') or row.get('current_address_street') or '',
+                current_barangay=body.get('current_address_barangay') or body.get('currentBarangay') or body.get('barangay') or row.get('current_address_barangay') or '',
+                current_municipality=body.get('current_address_municipality') or body.get('currentMunicipality') or body.get('municipality') or body.get('city') or row.get('current_address_municipality') or '',
+                current_province=body.get('current_address_province') or body.get('currentProvince') or body.get('province') or row.get('current_address_province') or '',
+                current_region=body.get('current_address_region') or body.get('currentRegion') or body.get('region') or row.get('current_address_region') or '',
+                current_zip=body.get('current_address_zip') or body.get('currentZipCode') or body.get('zipCode') or row.get('current_address_zip') or '',
+                current_landmark=body.get('current_address_landmark') or body.get('currentLandmark') or row.get('current_address_landmark') or '',
+                same_as_current=body.get('same_as_current') or row.get('same_as_current') or False
             )
             if not ok:
                 return jsonify(error=msg or 'Update failed'), 400
@@ -1385,11 +1392,27 @@ def qr_validate():
 
 # Register library entry/exit endpoints
 try:
+    from library_session_manager import register_library_session_endpoints
+    register_library_session_endpoints(app)
+    print('✅ Library session endpoints loaded')
+except Exception as e:
+    print(f'⚠️  Library session endpoints not loaded: {e}')
+
+# Register additional library endpoints (book operations)
+try:
     from library_endpoints import register_library_endpoints
     register_library_endpoints(app)
-    print('✅ Library endpoints loaded')
+    print('✅ Library book endpoints loaded')
 except Exception as e:
-    print(f'⚠️  Library endpoints not loaded: {e}')
+    print(f'⚠️  Library book endpoints not loaded: {e}')
+
+# Register password management endpoints
+try:
+    from password_endpoints import register_password_endpoints
+    register_password_endpoints(app)
+    print('✅ Password endpoints loaded')
+except Exception as e:
+    print(f'⚠️  Password endpoints not loaded: {e}')
 
 if __name__ == '__main__':
     print('🚀 Backend running at http://localhost:5000')

@@ -11,13 +11,18 @@ import AIAssistant from "@/components/Layout/AIAssistant";
 import { BorrowService, type BorrowRecord } from "@/services/borrow";
 import { NotificationsService } from "@/services/notifications";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/hooks/use-toast";
+import { exportToXLSX } from "@/services/reports";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 const History = () => {
   const { user } = useAuth();
+  const { toast } = useToast();
   const userType: "student" | "admin" = user?.role ?? "student";
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [historyData, setHistoryData] = useState<BorrowRecord[]>([]);
+  const [showNoDataModal, setShowNoDataModal] = useState(false);
 
   useEffect(() => {
     setHistoryData(BorrowService.list());
@@ -90,7 +95,40 @@ const History = () => {
                     </SelectContent>
                   </Select>
 
-                  <Button variant="outline" className="gap-2">
+                  <Button 
+                    variant="outline" 
+                    className="gap-2"
+                    onClick={() => {
+                      if (filtered.length === 0) {
+                        setShowNoDataModal(true);
+                        return;
+                      }
+                      try {
+                        const exportData = filtered.map(r => ({
+                          TransactionID: r.id,
+                          BookTitle: r.bookTitle,
+                          BookID: r.bookId,
+                          StudentID: r.studentId,
+                          BorrowDate: r.borrowDate,
+                          DueDate: r.dueDate,
+                          ReturnDate: r.returnDate || 'Not returned',
+                          Status: r.status
+                        }));
+                        exportToXLSX('BorrowHistory', exportData, 'borrow_history.xlsx');
+                        toast({
+                          title: "Export Successful",
+                          description: "Borrow/Return history has been exported to Excel.",
+                        });
+                      } catch (error) {
+                        console.error('Export error:', error);
+                        toast({
+                          title: "Export Failed",
+                          description: "Failed to export report. Please try again.",
+                          variant: "destructive"
+                        });
+                      }
+                    }}
+                  >
                     <Download className="h-4 w-4" />
                     Export Report
                   </Button>
@@ -174,6 +212,26 @@ const History = () => {
           </div>
         </main>
       </div>
+
+      {/* No Data Modal */}
+      <Dialog open={showNoDataModal} onOpenChange={setShowNoDataModal}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>No Data Available</DialogTitle>
+            <DialogDescription>
+              There is no borrow/return history data to export yet.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="text-center py-6">
+            <p className="text-muted-foreground">
+              History records will appear here once books are borrowed and returned.
+            </p>
+          </div>
+          <div className="flex justify-end">
+            <Button onClick={() => setShowNoDataModal(false)}>Close</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AIAssistant />
     </div>

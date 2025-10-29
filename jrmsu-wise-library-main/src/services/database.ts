@@ -47,6 +47,49 @@ export interface User {
   phone?: string;
   address?: string;
   
+  // Admin Address Fields (Simpler Schema)
+  street?: string;
+  barangay?: string;
+  municipality?: string;
+  province?: string;
+  region?: string;
+  country?: string;
+  zip_code?: string;
+  current_street?: string;
+  current_barangay?: string;
+  current_municipality?: string;
+  current_province?: string;
+  current_region?: string;
+  current_country?: string;
+  current_zip?: string;
+  current_landmark?: string;
+  same_as_current?: boolean;
+  permanent_address?: string; // Computed full string
+  current_address?: string; // Computed full string
+  
+  // Student Address Fields (Detailed Schema)
+  permanent_address_street?: string;
+  permanent_address_barangay?: string;
+  permanent_address_municipality?: string;
+  permanent_address_province?: string;
+  permanent_address_region?: string;
+  permanent_address_zip?: string;
+  current_address_street?: string;
+  current_address_barangay?: string;
+  current_address_municipality?: string;
+  current_address_province?: string;
+  current_address_region?: string;
+  current_address_zip?: string;
+  current_address_landmark?: string;
+  
+  // Additional Registration Fields
+  suffix?: string;
+  position?: string; // Admin position
+  college_department?: string; // Student
+  course_major?: string; // Student
+  year_level?: string; // Student
+  block?: string; // Student
+  
   // Preferences
   aiMode?: 'study' | 'guide' | 'support';
 }

@@ -89,4 +89,43 @@ export const pythonApi = {
     if (!r.ok) throw new Error(r.statusText);
     return r.json();
   },
+  async changePassword(params: { userId: string; userType: string; currentPassword: string; newPassword: string }) {
+    try {
+      const r = await fetch(`${BASE}/api/users/${encodeURIComponent(params.userId)}/change-password`, {
+        method: 'POST',
+        ...json({
+          userType: params.userType,
+          currentPassword: params.currentPassword,
+          newPassword: params.newPassword
+        })
+      });
+      if (!r.ok) {
+        const errorData = await r.json().catch(() => ({ message: r.statusText }));
+        return { success: false, message: errorData.message || 'Failed to change password' };
+      }
+      const data = await r.json();
+      return { success: true, ...data };
+    } catch (error: any) {
+      return { success: false, message: error.message || 'Network error' };
+    }
+  },
+  async resetUserPassword(params: { userId: string; userType: string; newPassword: string }) {
+    try {
+      const r = await fetch(`${BASE}/api/users/${encodeURIComponent(params.userId)}/reset-password`, {
+        method: 'POST',
+        ...json({
+          userType: params.userType,
+          newPassword: params.newPassword
+        })
+      });
+      if (!r.ok) {
+        const errorData = await r.json().catch(() => ({ message: r.statusText }));
+        return { success: false, message: errorData.message || 'Failed to reset password' };
+      }
+      const data = await r.json();
+      return { success: true, ...data };
+    } catch (error: any) {
+      return { success: false, message: error.message || 'Network error' };
+    }
+  },
 };

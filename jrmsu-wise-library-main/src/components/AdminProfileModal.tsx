@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { X, Upload, Download, RotateCcw, Save, AlertCircle } from "lucide-react";
+import { X, Upload, Download, RotateCcw, Save, AlertCircle, Eye, EyeOff, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,6 +38,14 @@ export const AdminProfileModal: React.FC<AdminProfileModalProps> = ({
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
   const [isGeneratingQR, setIsGeneratingQR] = useState(false);
   const [open2FA, setOpen2FA] = useState(false);
+  
+  // Password reset state
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
 
 const generateQRCode = useCallback(async () => {
     try {
@@ -46,18 +54,21 @@ const generateQRCode = useCallback(async () => {
       // Generate secure tokens if they don't exist
       const secureTokens = qrCodeService.generateSecureTokens();
       
+      // Use type assertion to access extended properties
+      const extendedFormData = formData as any;
+      
       const qrData = {
         fullName: formData.fullName || `${formData.firstName} ${formData.lastName}`,
         userId: formData.id,
         userType: formData.userType as "admin" | "student",
         department: formData.department,
         role: formData.role,
-        authCode: formData.realTimeAuthCode || secureTokens.realTimeAuthCode,
-        encryptedToken: formData.encryptedPasswordToken || secureTokens.encryptedPasswordToken,
+        authCode: extendedFormData.realTimeAuthCode || secureTokens.realTimeAuthCode,
+        encryptedToken: extendedFormData.encryptedPasswordToken || secureTokens.encryptedPasswordToken,
         twoFactorKey: formData.twoFactorKey,
-        realTimeAuthCode: formData.realTimeAuthCode || secureTokens.realTimeAuthCode,
-        encryptedPasswordToken: formData.encryptedPasswordToken || secureTokens.encryptedPasswordToken,
-        twoFactorSetupKey: formData.twoFactorSetupKey || secureTokens.twoFactorSetupKey,
+        realTimeAuthCode: extendedFormData.realTimeAuthCode || secureTokens.realTimeAuthCode,
+        encryptedPasswordToken: extendedFormData.encryptedPasswordToken || secureTokens.encryptedPasswordToken,
+        twoFactorSetupKey: extendedFormData.twoFactorSetupKey || secureTokens.twoFactorSetupKey,
         systemTag: formData.systemTag || "JRMSU-KCL",
         timestamp: Date.now(),
         systemId: "JRMSU-LIBRARY"
@@ -173,13 +184,13 @@ useEffect(() => {
 
       // Normalize position/role and name
       const position = (formData as any).position || formData.role;
-      const updatedAdmin: User = {
+      const updatedAdmin = {
         ...formData,
         role: position as any,
         // keep a separate 'position' field for clarity
         ...(position ? { position } : {}),
         fullName: `${formData.firstName.trim()} ${formData.lastName.trim()}`,
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date()
       } as User;
 
       // Update in local database and backend
@@ -202,7 +213,108 @@ useEffect(() => {
     // Reset form data to original admin data
     setFormData(admin);
     setProfileImage(admin.profilePicture || '');
+    setShowPasswordReset(false);
+    setNewPassword("");
+    setConfirmPassword("");
     onClose();
+  };
+
+  const handlePasswordReset = async () => {
+    // Validation
+    if (!newPassword || !confirmPassword) {
+      toast({
+        title: "Validation Error",
+        description: "Both password fields are required.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "Password Mismatch",
+        description: "Passwords do not match.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      toast({
+        title: "Weak Password",
+        description: "Password must be at least 8 characters long.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const hasUpperCase = /[A-Z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+    if (!hasUpperCase || !hasNumber) {
+      toast({
+        title: "Weak Password",
+        description: "Password must contain at least one uppercase letter and one number.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      setIsResettingPassword(true);
+
+      // Call backend API to reset password
+      const response = await pythonApi.resetUserPassword({
+        userId: formData.id,
+        userType: formData.userType,
+        newPassword
+      });
+
+      if (response.success) {
+        // Log activity
+        try {
+          ActivityService.log(formData.id, 'password_change', `Admin password reset for ${formData.fullName}`);
+        } catch (e) {
+          console.warn('Failed to log activity:', e);
+        }
+
+        // Notify admin (simple notification)
+        try {
+          NotificationsService.add({
+            receiverId: formData.id,
+            type: 'system',
+            message: `Your password has been reset successfully.`,
+            metadata: { action: 'password_reset' }
+          });
+        } catch (e) {
+          console.warn('Failed to send notification:', e);
+        }
+
+        toast({
+          title: "Password Reset",
+          description: "Admin password has been reset successfully.",
+        });
+
+        // Clear form and close password reset
+        setNewPassword("");
+        setConfirmPassword("");
+        setShowPasswordReset(false);
+      } else {
+        toast({
+          title: "Reset Failed",
+          description: response.message || "Failed to reset password.",
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error('Password reset error:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to reset password. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsResettingPassword(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -383,6 +495,211 @@ useEffect(() => {
           </div>
           </div>
 
+          {/* Address Information */}
+          <div className="space-y-4">
+            <Label className="text-base font-semibold">Address Information</Label>
+            
+            {/* Permanent Address */}
+            <div className="space-y-3">
+              <Label className="text-sm font-medium text-primary">Permanent Address</Label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="street">Street</Label>
+                  <Input
+                    id="street"
+                    name="street"
+                    value={formData.street || ''}
+                    onChange={(e) => handleInputChange('street', e.target.value)}
+                    placeholder="Enter street address"
+                    autoComplete="address-line1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="barangay">Barangay</Label>
+                  <Input
+                    id="barangay"
+                    name="barangay"
+                    value={formData.barangay || ''}
+                    onChange={(e) => handleInputChange('barangay', e.target.value)}
+                    placeholder="Enter barangay"
+                    autoComplete="address-level3"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="municipality">Municipality/City</Label>
+                  <Input
+                    id="municipality"
+                    name="municipality"
+                    value={formData.municipality || ''}
+                    onChange={(e) => handleInputChange('municipality', e.target.value)}
+                    placeholder="Enter municipality/city"
+                    autoComplete="address-level2"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="province">Province</Label>
+                  <Input
+                    id="province"
+                    name="province"
+                    value={formData.province || ''}
+                    onChange={(e) => handleInputChange('province', e.target.value)}
+                    placeholder="Enter province"
+                    autoComplete="address-level1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="region">Region</Label>
+                  <Input
+                    id="region"
+                    name="region"
+                    value={formData.region || ''}
+                    onChange={(e) => handleInputChange('region', e.target.value)}
+                    placeholder="Enter region"
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="zip_code">Zip Code</Label>
+                  <Input
+                    id="zip_code"
+                    name="zip_code"
+                    value={formData.zip_code || ''}
+                    onChange={(e) => handleInputChange('zip_code', e.target.value)}
+                    placeholder="Enter zip code"
+                    autoComplete="postal-code"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Current Address */}
+            <div className="space-y-3 pt-4 border-t">
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium text-primary">Current Address</Label>
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="checkbox"
+                    id="same_as_current"
+                    checked={formData.same_as_current || false}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      if (checked) {
+                        setFormData(prev => ({
+                          ...prev,
+                          same_as_current: true,
+                          current_street: prev.street,
+                          current_barangay: prev.barangay,
+                          current_municipality: prev.municipality,
+                          current_province: prev.province,
+                          current_region: prev.region,
+                          current_zip: prev.zip_code
+                        }));
+                      } else {
+                        handleInputChange('same_as_current', false);
+                      }
+                    }}
+                    className="h-4 w-4 rounded border-gray-300"
+                  />
+                  <Label htmlFor="same_as_current" className="text-sm font-normal cursor-pointer">
+                    Same as Permanent Address
+                  </Label>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label htmlFor="current_street">Street</Label>
+                  <Input
+                    id="current_street"
+                    name="current_street"
+                    value={formData.current_street || ''}
+                    onChange={(e) => handleInputChange('current_street', e.target.value)}
+                    placeholder="Enter street address"
+                    disabled={formData.same_as_current}
+                    className={formData.same_as_current ? 'bg-muted' : ''}
+                    autoComplete="address-line1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="current_barangay">Barangay</Label>
+                  <Input
+                    id="current_barangay"
+                    name="current_barangay"
+                    value={formData.current_barangay || ''}
+                    onChange={(e) => handleInputChange('current_barangay', e.target.value)}
+                    placeholder="Enter barangay"
+                    disabled={formData.same_as_current}
+                    className={formData.same_as_current ? 'bg-muted' : ''}
+                    autoComplete="address-level3"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="current_municipality">Municipality/City</Label>
+                  <Input
+                    id="current_municipality"
+                    name="current_municipality"
+                    value={formData.current_municipality || ''}
+                    onChange={(e) => handleInputChange('current_municipality', e.target.value)}
+                    placeholder="Enter municipality/city"
+                    disabled={formData.same_as_current}
+                    className={formData.same_as_current ? 'bg-muted' : ''}
+                    autoComplete="address-level2"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="current_province">Province</Label>
+                  <Input
+                    id="current_province"
+                    name="current_province"
+                    value={formData.current_province || ''}
+                    onChange={(e) => handleInputChange('current_province', e.target.value)}
+                    placeholder="Enter province"
+                    disabled={formData.same_as_current}
+                    className={formData.same_as_current ? 'bg-muted' : ''}
+                    autoComplete="address-level1"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="current_region">Region</Label>
+                  <Input
+                    id="current_region"
+                    name="current_region"
+                    value={formData.current_region || ''}
+                    onChange={(e) => handleInputChange('current_region', e.target.value)}
+                    placeholder="Enter region"
+                    disabled={formData.same_as_current}
+                    className={formData.same_as_current ? 'bg-muted' : ''}
+                    autoComplete="off"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="current_zip">Zip Code</Label>
+                  <Input
+                    id="current_zip"
+                    name="current_zip"
+                    value={formData.current_zip || ''}
+                    onChange={(e) => handleInputChange('current_zip', e.target.value)}
+                    placeholder="Enter zip code"
+                    disabled={formData.same_as_current}
+                    className={formData.same_as_current ? 'bg-muted' : ''}
+                    autoComplete="postal-code"
+                  />
+                </div>
+                <div className="space-y-2 md:col-span-2">
+                  <Label htmlFor="current_landmark">Landmark/Notes</Label>
+                  <Textarea
+                    id="current_landmark"
+                    name="current_landmark"
+                    value={formData.current_landmark || ''}
+                    onChange={(e) => handleInputChange('current_landmark', e.target.value)}
+                    placeholder="Enter landmark or additional notes"
+                    rows={2}
+                    autoComplete="off"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Security Settings */}
           <div className="space-y-4">
             <Label className="text-base font-semibold">Security Settings</Label>
@@ -400,6 +717,102 @@ useEffect(() => {
                 </div>
               </div>
             </div>
+          </div>
+
+          {/* Account Security - Password Reset */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2">
+              <Lock className="h-5 w-5 text-primary" />
+              <Label className="text-base font-semibold">Account Security</Label>
+            </div>
+            
+            {!showPasswordReset ? (
+              <Button 
+                variant="outline" 
+                className="w-full"
+                onClick={() => setShowPasswordReset(true)}
+              >
+                Reset Password
+              </Button>
+            ) : (
+              <div className="space-y-4 p-4 border rounded-lg bg-muted/30">
+                <div className="space-y-2">
+                  <Label htmlFor="newPassword">New Password</Label>
+                  <div className="relative">
+                    <Input
+                      id="newPassword"
+                      type={showNewPassword ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Enter new password"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                    >
+                      {showNewPassword ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Must be at least 8 characters with 1 uppercase and 1 number
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="confirmPassword">Confirm Password</Label>
+                  <div className="relative">
+                    <Input
+                      id="confirmPassword"
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter new password"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    className="flex-1"
+                    onClick={() => {
+                      setShowPasswordReset(false);
+                      setNewPassword("");
+                      setConfirmPassword("");
+                    }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    className="flex-1"
+                    onClick={handlePasswordReset}
+                    disabled={isResettingPassword}
+                  >
+                    {isResettingPassword ? "Resetting..." : "Confirm"}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Account Information */}

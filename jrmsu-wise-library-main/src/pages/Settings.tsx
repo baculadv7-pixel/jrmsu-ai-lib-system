@@ -5,13 +5,15 @@ import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Shield, Smartphone, Mail, Key, CheckCircle } from "lucide-react";
+import { Shield, Smartphone, Mail, Key, CheckCircle, Eye, EyeOff } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
 import TwoFASetup from "@/components/auth/TwoFASetup";
+import { pythonApi } from "@/services/pythonApi";
+import { ActivityService } from "@/services/activity";
 
 const Settings = () => {
   const { user, disableTwoFactor } = useAuth();
@@ -24,12 +26,109 @@ const Settings = () => {
   }, [user?.twoFactorEnabled]);
   const [emailAuth, setEmailAuth] = useState(true);
   const [smsAuth, setSmsAuth] = useState(false);
+  
+  // Password change state
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isChangingPassword, setIsChangingPassword] = useState(false);
 
   const handleSave2FA = () => {
     try {
       toast({ title: "Settings Saved", description: "Your 2FA settings have been updated successfully." });
     } catch (error) {
       console.warn('Failed to show toast:', error);
+    }
+  };
+
+  const handlePasswordChange = async () => {
+    // Validation
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast({
+        title: "Validation Error",
+        description: "All password fields are required.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (newPassword !== confirmPassword) {
+      toast({
+        title: "Password Mismatch",
+        description: "New password and confirm password do not match.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (newPassword.length < 8) {
+      toast({
+        title: "Weak Password",
+        description: "Password must be at least 8 characters long.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    // Check password strength
+    const hasUpperCase = /[A-Z]/.test(newPassword);
+    const hasNumber = /[0-9]/.test(newPassword);
+    if (!hasUpperCase || !hasNumber) {
+      toast({
+        title: "Weak Password",
+        description: "Password must contain at least one uppercase letter and one number.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      setIsChangingPassword(true);
+
+      // Call backend API to change password
+      const response = await pythonApi.changePassword({
+        userId: user?.id || '',
+        userType: userType,
+        currentPassword,
+        newPassword
+      });
+
+      if (response.success) {
+        // Log activity
+        try {
+          await ActivityService.log(user?.id || '', 'PASSWORD_CHANGED', 'Password updated successfully');
+        } catch (e) {
+          console.warn('Failed to log activity:', e);
+        }
+
+        toast({
+          title: "Password Updated",
+          description: "Your password has been changed successfully.",
+        });
+
+        // Clear form
+        setCurrentPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+      } else {
+        toast({
+          title: "Password Change Failed",
+          description: response.message || "Current password is incorrect.",
+          variant: "destructive"
+        });
+      }
+    } catch (error: any) {
+      console.error('Password change error:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to change password. Please try again.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsChangingPassword(false);
     }
   };
 
@@ -150,22 +249,92 @@ const Settings = () => {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label htmlFor="current-password">Current Password</Label>
-                  <Input id="current-password" type="password" />
+                  <div className="relative">
+                    <Input 
+                      id="current-password" 
+                      type={showCurrentPassword ? "text" : "password"}
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      placeholder="Enter current password"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    >
+                      {showCurrentPassword ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="new-password">New Password</Label>
-                  <Input id="new-password" type="password" />
+                  <div className="relative">
+                    <Input 
+                      id="new-password" 
+                      type={showNewPassword ? "text" : "password"}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="Enter new password"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                    >
+                      {showNewPassword ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Must be at least 8 characters with 1 uppercase and 1 number
+                  </p>
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="confirm-password">Confirm New Password</Label>
-                  <Input id="confirm-password" type="password" />
+                  <div className="relative">
+                    <Input 
+                      id="confirm-password" 
+                      type={showConfirmPassword ? "text" : "password"}
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      placeholder="Re-enter new password"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                      onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    >
+                      {showConfirmPassword ? (
+                        <EyeOff className="h-4 w-4 text-muted-foreground" />
+                      ) : (
+                        <Eye className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </Button>
+                  </div>
                 </div>
 
-                <Button className="w-full gap-2">
+                <Button 
+                  className="w-full gap-2"
+                  onClick={handlePasswordChange}
+                  disabled={isChangingPassword}
+                >
                   <CheckCircle className="h-4 w-4" />
-                  Update Password
+                  {isChangingPassword ? "Updating..." : "Update Password"}
                 </Button>
               </CardContent>
             </Card>

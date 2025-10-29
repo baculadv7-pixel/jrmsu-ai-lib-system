@@ -16,6 +16,7 @@ import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useMemo, useState, useCallback } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { BooksService, type BookRecord } from "@/services/books";
 import { BorrowService } from "@/services/borrow";
 import { ReservationsService } from "@/services/reservations";
@@ -40,6 +41,7 @@ const Books = () => {
   const [aiSearchResults, setAISearchResults] = useState<SearchResult[]>([]);
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [statsModal, setStatsModal] = useState<'total'|'available'|'categories'|'borrowed'|'reservations'|null>(null);
   const setView = (m: any) => { setViewMode(m); };
 
   useEffect(() => {
@@ -224,11 +226,11 @@ const Books = () => {
               <CardContent className="pt-6 space-y-4">
                 {/* Summary clickable */}
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-                  <Card className="hover:bg-muted cursor-pointer" onClick={()=>document.getElementById('inventory')?.scrollIntoView({behavior:'smooth'})}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Books</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-primary">{books.length}</div></CardContent></Card>
-                  <Card className="hover:bg-muted cursor-pointer" onClick={()=>alert('Available list: '+books.filter(b=>b.status==='available').length)}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Available</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-leaf">{books.filter(b=>b.status==='available').length}</div></CardContent></Card>
-                  <Card className="hover:bg-muted cursor-pointer" onClick={()=>alert('Categories: '+Array.from(new Set(books.map(b=>b.category))).join(', '))}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Categories</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-secondary">{Array.from(new Set(books.map(b=>b.category))).length}</div></CardContent></Card>
-                  <Card className="hover:bg-muted cursor-pointer" onClick={()=>alert('Borrowed: '+BorrowService.list().length)}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Borrowed</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-accent">{BorrowService.list().length}</div></CardContent></Card>
-                  <Card className="hover:bg-muted cursor-pointer" onClick={()=>alert('Reservations: '+ReservationsService.list().length)}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Reservations</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{ReservationsService.list().length}</div></CardContent></Card>
+                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('total')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Books</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-primary">{books.length}</div></CardContent></Card>
+                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('available')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Available</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-leaf">{books.filter(b=>b.status==='available').length}</div></CardContent></Card>
+                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('categories')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Categories</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-secondary">{Array.from(new Set(books.map(b=>b.category))).length}</div></CardContent></Card>
+                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('borrowed')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Borrowed</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-accent">{BorrowService.list().length}</div></CardContent></Card>
+                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('reservations')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Reservations</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{ReservationsService.list().length}</div></CardContent></Card>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
                   <div className="relative sm:col-span-2 lg:col-span-3">
@@ -407,6 +409,194 @@ const Books = () => {
           </div>
         </main>
       </div>
+
+      {/* Statistics Overlay Modals */}
+      <Dialog open={statsModal === 'total'} onOpenChange={(open) => !open && setStatsModal(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Total Books ({books.length})</DialogTitle>
+            <DialogDescription>Complete list of all books in the library inventory</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {books.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground text-lg">No data yet</p>
+                <p className="text-sm text-muted-foreground mt-2">Books will appear here once added to the inventory</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Book ID</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Author</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {books.map((book) => (
+                    <TableRow key={book.id}>
+                      <TableCell className="font-mono text-xs">{book.id}</TableCell>
+                      <TableCell className="font-medium">{book.title}</TableCell>
+                      <TableCell>{book.author}</TableCell>
+                      <TableCell><Badge variant={book.status === 'available' ? 'default' : 'secondary'}>{book.status}</Badge></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={statsModal === 'available'} onOpenChange={(open) => !open && setStatsModal(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Available Books ({books.filter(b => b.status === 'available').length})</DialogTitle>
+            <DialogDescription>Books currently available for borrowing</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {books.filter(b => b.status === 'available').length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground text-lg">No data yet</p>
+                <p className="text-sm text-muted-foreground mt-2">No books are currently available for borrowing</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Book ID</TableHead>
+                    <TableHead>Title</TableHead>
+                    <TableHead>Author</TableHead>
+                    <TableHead>Category</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {books.filter(b => b.status === 'available').map((book) => (
+                    <TableRow key={book.id}>
+                      <TableCell className="font-mono text-xs">{book.id}</TableCell>
+                      <TableCell className="font-medium">{book.title}</TableCell>
+                      <TableCell>{book.author}</TableCell>
+                      <TableCell>{book.category}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={statsModal === 'categories'} onOpenChange={(open) => !open && setStatsModal(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Book Categories ({Array.from(new Set(books.map(b => b.category))).length})</DialogTitle>
+            <DialogDescription>Distribution of books across categories</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            {Array.from(new Set(books.map(b => b.category))).length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground text-lg">No data yet</p>
+                <p className="text-sm text-muted-foreground mt-2">Categories will appear once books are added</p>
+              </div>
+            ) : (
+              Array.from(new Set(books.map(b => b.category))).map((category) => {
+                const count = books.filter(b => b.category === category).length;
+                const percentage = Math.round((count / books.length) * 100);
+                return (
+                  <div key={category} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-medium">{category}</span>
+                      <span className="text-sm text-muted-foreground">{count} books ({percentage}%)</span>
+                    </div>
+                    <div className="h-2 bg-muted rounded-full overflow-hidden">
+                      <div className="h-full bg-primary" style={{ width: `${percentage}%` }} />
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={statsModal === 'borrowed'} onOpenChange={(open) => !open && setStatsModal(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Borrowed Books ({BorrowService.list().length})</DialogTitle>
+            <DialogDescription>Books currently borrowed by students</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {BorrowService.list().length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground text-lg">No data yet</p>
+                <p className="text-sm text-muted-foreground mt-2">No books have been borrowed yet</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Book Title</TableHead>
+                    <TableHead>Student ID</TableHead>
+                    <TableHead>Borrow Date</TableHead>
+                    <TableHead>Due Date</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {BorrowService.list().map((record) => (
+                    <TableRow key={record.id}>
+                      <TableCell className="font-medium">{record.bookTitle}</TableCell>
+                      <TableCell className="font-mono text-xs">{record.studentId}</TableCell>
+                      <TableCell>{record.borrowDate}</TableCell>
+                      <TableCell>{record.dueDate}</TableCell>
+                      <TableCell><Badge className={record.status === 'overdue' ? 'bg-destructive' : 'bg-primary'}>{record.status}</Badge></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={statsModal === 'reservations'} onOpenChange={(open) => !open && setStatsModal(null)}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Book Reservations ({ReservationsService.list().length})</DialogTitle>
+            <DialogDescription>Books reserved by students</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {ReservationsService.list().length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground text-lg">No data yet</p>
+                <p className="text-sm text-muted-foreground mt-2">No reservations have been made yet</p>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Book Title</TableHead>
+                    <TableHead>Student</TableHead>
+                    <TableHead>Reserved Date</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {ReservationsService.list().map((reservation) => (
+                    <TableRow key={reservation.id}>
+                      <TableCell className="font-medium">{reservation.bookTitle}</TableCell>
+                      <TableCell>{reservation.studentName} ({reservation.studentId})</TableCell>
+                      <TableCell>{reservation.createdAt}</TableCell>
+                      <TableCell><Badge variant="outline">Reserved</Badge></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

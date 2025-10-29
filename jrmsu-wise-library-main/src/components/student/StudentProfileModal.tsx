@@ -544,19 +544,232 @@ export function StudentProfileModal({ isOpen, onClose, student, onSave }: Studen
                   Address Information
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Current Address</Label>
+              <CardContent className="space-y-6">
+                {/* Permanent Address */}
+                <div className="space-y-3">
+                  <Label className="text-sm font-semibold text-primary">Permanent Address</Label>
                   {isEditing ? (
-                    <Textarea
-                      value={editedStudent.address || ""}
-                      onChange={(e) => setEditedStudent(prev => ({ ...prev, address: e.target.value }))}
-                      placeholder="Complete address..."
-                      rows={2}
-                    />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="permanent_address_street">Street</Label>
+                        <Input
+                          id="permanent_address_street"
+                          name="permanent_address_street"
+                          value={editedStudent.permanent_address_street || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, permanent_address_street: e.target.value }))}
+                          placeholder="Enter street address"
+                          autoComplete="address-line1"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="permanent_address_barangay">Barangay</Label>
+                        <Input
+                          id="permanent_address_barangay"
+                          name="permanent_address_barangay"
+                          value={editedStudent.permanent_address_barangay || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, permanent_address_barangay: e.target.value }))}
+                          placeholder="Enter barangay"
+                          autoComplete="address-level3"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="permanent_address_municipality">Municipality/City</Label>
+                        <Input
+                          id="permanent_address_municipality"
+                          name="permanent_address_municipality"
+                          value={editedStudent.permanent_address_municipality || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, permanent_address_municipality: e.target.value }))}
+                          placeholder="Enter municipality/city"
+                          autoComplete="address-level2"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="permanent_address_province">Province</Label>
+                        <Input
+                          id="permanent_address_province"
+                          name="permanent_address_province"
+                          value={editedStudent.permanent_address_province || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, permanent_address_province: e.target.value }))}
+                          placeholder="Enter province"
+                          autoComplete="address-level1"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="permanent_address_region">Region</Label>
+                        <Input
+                          id="permanent_address_region"
+                          name="permanent_address_region"
+                          value={editedStudent.permanent_address_region || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, permanent_address_region: e.target.value }))}
+                          placeholder="Enter region"
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="permanent_address_zip">Zip Code</Label>
+                        <Input
+                          id="permanent_address_zip"
+                          name="permanent_address_zip"
+                          value={editedStudent.permanent_address_zip || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, permanent_address_zip: e.target.value }))}
+                          placeholder="Enter zip code"
+                          autoComplete="postal-code"
+                        />
+                      </div>
+                    </div>
                   ) : (
-                    <p className="p-2 bg-muted rounded min-h-[60px]">
-                      {student.address || "123 Main Street, Barangay Central, Dipolog City, Zamboanga del Norte, Philippines 7100"}
+                    <p className="p-3 bg-muted rounded min-h-[60px]">
+                      {[
+                        student.permanent_address_street,
+                        student.permanent_address_barangay,
+                        student.permanent_address_municipality,
+                        student.permanent_address_province,
+                        student.permanent_address_region,
+                        student.permanent_address_zip
+                      ].filter(Boolean).join(', ') || student.address || "Not provided"}
+                    </p>
+                  )}
+                </div>
+
+                {/* Current Address */}
+                <div className="space-y-3 pt-4 border-t">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-semibold text-primary">Current Address</Label>
+                    {isEditing && (
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="checkbox"
+                          id="same_as_current"
+                          checked={editedStudent.same_as_current || false}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            if (checked) {
+                              setEditedStudent(prev => ({
+                                ...prev,
+                                same_as_current: true,
+                                current_address_street: prev.permanent_address_street,
+                                current_address_barangay: prev.permanent_address_barangay,
+                                current_address_municipality: prev.permanent_address_municipality,
+                                current_address_province: prev.permanent_address_province,
+                                current_address_region: prev.permanent_address_region,
+                                current_address_zip: prev.permanent_address_zip
+                              }));
+                            } else {
+                              setEditedStudent(prev => ({ ...prev, same_as_current: false }));
+                            }
+                          }}
+                          className="h-4 w-4 rounded border-gray-300"
+                        />
+                        <Label htmlFor="same_as_current" className="text-sm font-normal cursor-pointer">
+                          Same as Permanent Address
+                        </Label>
+                      </div>
+                    )}
+                  </div>
+                  {isEditing ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="space-y-2">
+                        <Label htmlFor="current_address_street">Street</Label>
+                        <Input
+                          id="current_address_street"
+                          name="current_address_street"
+                          value={editedStudent.current_address_street || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, current_address_street: e.target.value }))}
+                          placeholder="Enter street address"
+                          disabled={editedStudent.same_as_current}
+                          className={editedStudent.same_as_current ? 'bg-muted' : ''}
+                          autoComplete="address-line1"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="current_address_barangay">Barangay</Label>
+                        <Input
+                          id="current_address_barangay"
+                          name="current_address_barangay"
+                          value={editedStudent.current_address_barangay || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, current_address_barangay: e.target.value }))}
+                          placeholder="Enter barangay"
+                          disabled={editedStudent.same_as_current}
+                          className={editedStudent.same_as_current ? 'bg-muted' : ''}
+                          autoComplete="address-level3"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="current_address_municipality">Municipality/City</Label>
+                        <Input
+                          id="current_address_municipality"
+                          name="current_address_municipality"
+                          value={editedStudent.current_address_municipality || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, current_address_municipality: e.target.value }))}
+                          placeholder="Enter municipality/city"
+                          disabled={editedStudent.same_as_current}
+                          className={editedStudent.same_as_current ? 'bg-muted' : ''}
+                          autoComplete="address-level2"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="current_address_province">Province</Label>
+                        <Input
+                          id="current_address_province"
+                          name="current_address_province"
+                          value={editedStudent.current_address_province || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, current_address_province: e.target.value }))}
+                          placeholder="Enter province"
+                          disabled={editedStudent.same_as_current}
+                          className={editedStudent.same_as_current ? 'bg-muted' : ''}
+                          autoComplete="address-level1"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="current_address_region">Region</Label>
+                        <Input
+                          id="current_address_region"
+                          name="current_address_region"
+                          value={editedStudent.current_address_region || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, current_address_region: e.target.value }))}
+                          placeholder="Enter region"
+                          disabled={editedStudent.same_as_current}
+                          className={editedStudent.same_as_current ? 'bg-muted' : ''}
+                          autoComplete="off"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="current_address_zip">Zip Code</Label>
+                        <Input
+                          id="current_address_zip"
+                          name="current_address_zip"
+                          value={editedStudent.current_address_zip || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, current_address_zip: e.target.value }))}
+                          placeholder="Enter zip code"
+                          disabled={editedStudent.same_as_current}
+                          className={editedStudent.same_as_current ? 'bg-muted' : ''}
+                          autoComplete="postal-code"
+                        />
+                      </div>
+                      <div className="space-y-2 md:col-span-2">
+                        <Label htmlFor="current_address_landmark">Landmark/Notes</Label>
+                        <Textarea
+                          id="current_address_landmark"
+                          name="current_address_landmark"
+                          value={editedStudent.current_address_landmark || ''}
+                          onChange={(e) => setEditedStudent(prev => ({ ...prev, current_address_landmark: e.target.value }))}
+                          placeholder="Enter landmark or additional notes"
+                          rows={2}
+                          autoComplete="off"
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="p-3 bg-muted rounded min-h-[60px]">
+                      {[
+                        student.current_address_street,
+                        student.current_address_barangay,
+                        student.current_address_municipality,
+                        student.current_address_province,
+                        student.current_address_region,
+                        student.current_address_zip,
+                        student.current_address_landmark
+                      ].filter(Boolean).join(', ') || student.address || "Not provided"}
                     </p>
                   )}
                 </div>

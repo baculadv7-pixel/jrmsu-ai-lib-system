@@ -186,7 +186,7 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-3">
-            <img src={logo} alt="JRMSU" className="h-10 w-10 object-contain" />
+            <img src={logo} alt="JRMSU" className="h-10 w-10 object-contain rounded-md bg-navy" />
             <div className="text-navy-foreground">
               <h1 className="text-lg font-bold">JRMSU Library</h1>
               <p className="text-xs text-secondary">AI-Powered System</p>
@@ -212,30 +212,43 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
                   )}
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-[90vw] sm:w-[26rem] max-w-[95vw]">
-                <div className="p-2 border-b flex items-center justify-between gap-2 sticky top-0 bg-background z-10">
-                  <h3 className="font-semibold">Notifications</h3>
-                  <div className="ml-auto flex items-center gap-2">
-                    <Button size="sm" variant={filter==='all'?'default':'outline'} onClick={() => { setFilter('all'); reload('all'); }}>All</Button>
-                    <Button size="sm" variant={filter==='unread'?'default':'outline'} onClick={() => { setFilter('unread'); reload('unread'); }}>Unread ({unreadCount})</Button>
-                    <Button size="sm" onClick={handleMarkAllRead}>Mark all read</Button>
+              <DropdownMenuContent align="end" className="w-[90vw] sm:w-[28rem] md:w-[32rem] lg:w-[36rem] max-w-[95vw] p-0">
+                {/* Header - Sticky */}
+                <div className="p-3 sm:p-4 border-b flex flex-col sm:flex-row items-start sm:items-center gap-2 sticky top-0 bg-background z-10">
+                  <h3 className="font-semibold text-base sm:text-lg">Notifications</h3>
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 sm:ml-auto">
+                    <Button size="sm" variant={filter==='all'?'default':'outline'} onClick={() => { setFilter('all'); reload('all'); }} className="text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3">
+                      All
+                    </Button>
+                    <Button size="sm" variant={filter==='unread'?'default':'outline'} onClick={() => { setFilter('unread'); reload('unread'); }} className="text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3">
+                      Unread ({unreadCount})
+                    </Button>
+                    <Button size="sm" onClick={handleMarkAllRead} className="text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3">
+                      Mark all read
+                    </Button>
                   </div>
                 </div>
-                {filteredNotifications.slice(0, 25).map((n) => (
-                  <DropdownMenuItem key={n.id} onClick={() => openNotification(n.id)}>
-                    <div className="flex flex-col gap-1 w-full">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium truncate">{n.title || 'Notification'}</p>
-                        {!n.read && <span className="w-2 h-2 rounded-full bg-primary" />}
+                
+                {/* Scrollable Content Area */}
+                <div className="max-h-[60vh] sm:max-h-[70vh] overflow-y-auto overflow-x-hidden">
+                  {filteredNotifications.slice(0, 50).map((n) => (
+                    <DropdownMenuItem key={n.id} onClick={() => openNotification(n.id)} className="cursor-pointer hover:bg-muted/50 focus:bg-muted/50 px-3 sm:px-4 py-3 border-b last:border-b-0">
+                      <div className="flex flex-col gap-1.5 w-full">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm sm:text-base font-medium line-clamp-2 flex-1">{n.title || 'Notification'}</p>
+                          {!n.read && <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-blue-600 flex-shrink-0 mt-1" />}
+                        </div>
+                        <p className="text-xs sm:text-sm text-muted-foreground line-clamp-3">{n.body}</p>
+                        <p className="text-xs text-muted-foreground/80">{new Date(n.created_at*1000).toLocaleString()}</p>
                       </div>
-                      <p className="text-xs text-muted-foreground line-clamp-2">{n.body}</p>
-                      <p className="text-xs text-muted-foreground">{new Date(n.created_at*1000).toLocaleString()}</p>
+                    </DropdownMenuItem>
+                  ))}
+                  {filteredNotifications.length === 0 && (
+                    <div className="p-6 sm:p-8 text-center text-sm text-muted-foreground">
+                      No notifications
                     </div>
-                  </DropdownMenuItem>
-                ))}
-                {filteredNotifications.length === 0 && (
-                  <div className="p-3 text-xs text-muted-foreground">No notifications</div>
-                )}
+                  )}
+                </div>
               </DropdownMenuContent>
             </DropdownMenu>
 

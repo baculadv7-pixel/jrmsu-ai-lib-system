@@ -240,31 +240,63 @@ class StudentDB:
         course: str,
         year_level: str,
         block: str,
-        current_street: str,
-        current_barangay: str,
-        current_municipality: str,
-        current_province: str,
-        current_region: str,
-        current_zip: str,
-        current_landmark: str
+        permanent_street: str = '',
+        permanent_barangay: str = '',
+        permanent_municipality: str = '',
+        permanent_province: str = '',
+        permanent_region: str = '',
+        permanent_zip: str = '',
+        current_street: str = '',
+        current_barangay: str = '',
+        current_municipality: str = '',
+        current_province: str = '',
+        current_region: str = '',
+        current_zip: str = '',
+        current_landmark: str = '',
+        same_as_current: bool = False
     ) -> Tuple[bool, str]:
         """
-        Update student profile using stored procedure.
+        Update student profile with all address fields.
         Returns (success, message)
         """
         try:
             with get_db_connection() as conn:
                 cursor = conn.cursor()
                 
-                success_out = cursor.var(int)
-                message_out = cursor.var(str)
+                # Build UPDATE query with all fields
+                query = """
+                    UPDATE students SET
+                        college_department = %s,
+                        course_major = %s,
+                        year_level = %s,
+                        block = %s,
+                        permanent_address_street = %s,
+                        permanent_address_barangay = %s,
+                        permanent_address_municipality = %s,
+                        permanent_address_province = %s,
+                        permanent_address_region = %s,
+                        permanent_address_zip = %s,
+                        current_address_street = %s,
+                        current_address_barangay = %s,
+                        current_address_municipality = %s,
+                        current_address_province = %s,
+                        current_address_region = %s,
+                        current_address_zip = %s,
+                        current_address_landmark = %s,
+                        same_as_current = %s,
+                        updated_at = NOW()
+                    WHERE student_id = %s
+                """
                 
-                cursor.callproc('sp_update_student_profile', [
-                    student_id, department, course, year_level, block,
+                cursor.execute(query, (
+                    department, course, year_level, block,
+                    permanent_street, permanent_barangay, permanent_municipality,
+                    permanent_province, permanent_region, permanent_zip,
                     current_street, current_barangay, current_municipality,
                     current_province, current_region, current_zip, current_landmark,
-                    success_out, message_out
-                ])
+                    1 if same_as_current else 0,
+                    student_id
+                ))
                 
                 conn.commit()
                 cursor.close()
