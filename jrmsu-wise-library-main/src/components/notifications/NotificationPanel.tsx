@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Bell, Check, X, MoreVertical } from "lucide-react";
+import { Bell, Check, X, MoreVertical, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 // Database-like notification structure
 export interface LibraryNotification {
@@ -43,6 +44,8 @@ export function NotificationPanel({
   onDismiss
 }: NotificationPanelProps) {
   const [open, setOpen] = useState(false);
+  const [selectedNotification, setSelectedNotification] = useState<LibraryNotification | null>(null);
+  const [showDetailDialog, setShowDetailDialog] = useState(false);
   const { toast } = useToast();
 
   const unreadNotifications = useMemo(() => 
@@ -86,8 +89,14 @@ export function NotificationPanel({
     if (notification.Status === "Unread") {
       onMarkAsRead(notification.NotificationID);
     }
-    onNotificationClick(notification);
+    
+    // Show detail dialog
+    setSelectedNotification(notification);
+    setShowDetailDialog(true);
     setOpen(false);
+    
+    // Also call the original handler
+    onNotificationClick(notification);
   };
 
   const handleMarkAllRead = () => {
@@ -268,5 +277,118 @@ export function NotificationPanel({
         </Tabs>
       </DropdownMenuContent>
     </DropdownMenu>
+
+    {/* Notification Detail Dialog */}
+    <Dialog open={showDetailDialog} onOpenChange={setShowDetailDialog}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">
+              {selectedNotification && getNotificationIcon(selectedNotification.Type)}
+            </span>
+            <div className="flex-1">
+              <DialogTitle className="text-xl">
+                {selectedNotification?.Title}
+              </DialogTitle>
+              <DialogDescription className="flex items-center gap-2 mt-1">
+                <Badge variant="outline">{selectedNotification?.Type}</Badge>
+                <span className="text-xs">
+                  {selectedNotification && formatTimestamp(selectedNotification.CreatedAt)}
+                </span>
+              </DialogDescription>
+            </div>
+          </div>
+        </DialogHeader>
+        
+        <div className="space-y-4">
+          {/* Full Message */}
+          <div className="bg-muted/50 p-4 rounded-lg">
+            <p className="text-sm leading-relaxed whitespace-pre-wrap">
+              {selectedNotification?.Message}
+            </p>
+          </div>
+
+          {/* Metadata */}
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="text-muted-foreground mb-1">Status</p>
+              <Badge variant={selectedNotification?.Status === 'Unread' ? 'default' : 'secondary'}>
+                {selectedNotification?.Status}
+              </Badge>
+            </div>
+            <div>
+              <p className="text-muted-foreground mb-1">Notification ID</p>
+              <p className="font-mono text-xs">{selectedNotification?.NotificationID}</p>
+            </div>
+            <div>
+              <p className="text-muted-foreground mb-1">Created</p>
+              <p className="text-xs">
+                {selectedNotification?.CreatedAt.toLocaleString('en-US', {
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </p>
+            </div>
+            <div>
+              <p className="text-muted-foreground mb-1">Type</p>
+              <p className="capitalize">{selectedNotification?.Type}</p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-2 justify-end pt-4 border-t">
+            {selectedNotification?.Status === 'Unread' && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  if (selectedNotification) {
+                    onMarkAsRead(selectedNotification.NotificationID);
+                    setSelectedNotification({
+                      ...selectedNotification,
+                      Status: 'Read'
+                    });
+                    toast({
+                      title: "Marked as read",
+                      description: "Notification has been marked as read"
+                    });
+                  }
+                }}
+              >
+                <Check className="h-4 w-4 mr-2" />
+                Mark as Read
+              </Button>
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (selectedNotification) {
+                  onDismiss(selectedNotification.NotificationID);
+                  setShowDetailDialog(false);
+                  toast({
+                    title: "Notification dismissed",
+                    description: "Notification has been removed"
+                  });
+                }
+              }}
+            >
+              <X className="h-4 w-4 mr-2" />
+              Dismiss
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => setShowDetailDialog(false)}
+            >
+              Close
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  </>
   );
 }
