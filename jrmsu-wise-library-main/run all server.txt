@@ -1,0 +1,82 @@
+then manual only not using bat and ps1
+
+with location
+
+check if same behavior
+
+Below are manual, copy-paste commands with full paths that enforce the same behavior (free the reserved port first, then start the service). Run each group in its own terminal window.
+
+
+
+
+
+PowerShell (recommended)
+
+1) Backend (5000)
+- Kill port 5000:
+  $p=Get-NetTCPConnection -State Listen -LocalPort 5000 -ErrorAction SilentlyContinue | Select-Object -Expand OwningProcess -Unique; if($p){$p|ForEach-Object{Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue}}
+- Start backend:
+  cd 'C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\jrmsu-wise-library-main\python-backend'
+  if (Test-Path .\.venv\Scripts\Activate.ps1){ .\.venv\Scripts\Activate.ps1 }
+  python app.py
+
+2) Main system (8080)
+- Kill port 8080:
+  $p=Get-NetTCPConnection -State Listen -LocalPort 8080 -ErrorAction SilentlyContinue | Select-Object -Expand OwningProcess -Unique; if($p){$p|ForEach-Object{Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue}}
+- Start main:
+  cd 'C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\jrmsu-wise-library-main'
+  npm run dev
+
+3) Mirror page (8081)
+- Kill port 8081:
+  $p=Get-NetTCPConnection -State Listen -LocalPort 8081 -ErrorAction SilentlyContinue | Select-Object -Expand OwningProcess -Unique; if($p){$p|ForEach-Object{Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue}}
+- Start mirror:
+  cd 'C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\mirror-login-page'
+  npm run dev
+
+4) AI server (5002)
+- Kill port 5002:
+  $p=Get-NetTCPConnection -State Listen -LocalPort 5002 -ErrorAction SilentlyContinue | Select-Object -Expand OwningProcess -Unique; if($p){$p|ForEach-Object{Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue}}
+- Start AI:
+  cd 'C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\ai_server'
+  python app.py
+
+5) Ollama (11434)
+- Kill port 11434:
+  $p=Get-NetTCPConnection -State Listen -LocalPort 11434 -ErrorAction SilentlyContinue | Select-Object -Expand OwningProcess -Unique; if($p){$p|ForEach-Object{Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue}}
+- Start Ollama:
+  setx OLLAMA_HOST '127.0.0.1:11434' | Out-Null; $env:OLLAMA_HOST='127.0.0.1:11434'
+  ollama serve
+
+CMD (alternative)
+
+Use these per service before starting:
+
+- Kill a port:
+  for /f "tokens=5" %a in ('netstat -ano ^| findstr ":5000"') do taskkill /F /PID %a
+  (replace 5000 with 8080, 8081, 5002, 11434 as needed)
+
+- Backend:
+  cd "C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\jrmsu-wise-library-main\python-backend"
+  .\.venv\Scripts\activate.bat
+  python app.py
+
+- Main:
+  cd "C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\jrmsu-wise-library-main"
+  npm run dev
+
+- Mirror:
+  cd "C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\mirror-login-page"
+  npm run dev
+
+- AI:
+  cd "C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\ai_server"
+  python app.py
+
+- Ollama:
+  set OLLAMA_HOST=127.0.0.1:11434
+  ollama serve
+
+Notes
+- Always run the kill command for the port before starting its service to reclaim the reserved port.
+- Open each service in a separate terminal to run all concurrently.

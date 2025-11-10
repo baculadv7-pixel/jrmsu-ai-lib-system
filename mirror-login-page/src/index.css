@@ -1,0 +1,169 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+All colors MUST be HSL.
+*/
+
+@layer base {
+  :root {
+    /* JRMSU Royal Blue Theme */
+    --background: 217 33% 97%;
+    --foreground: 222 47% 11%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary: JRMSU Royal Blue (#0033A0) */
+    --primary: 215 100% 31%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Secondary: Gold (#FFD700) */
+    --secondary: 51 100% 50%;
+    --secondary-foreground: 222 47% 11%;
+
+    /* Muted: Cool Gray */
+    --muted: 214 32% 91%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent: Leaf Green (#2E8B57) */
+    --accent: 146 50% 36%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Destructive: Error Red */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Deep Navy (#001F54) */
+    --navy: 217 100% 16%;
+    --navy-foreground: 0 0% 100%;
+
+    /* Borders & Inputs */
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 215 100% 31%;
+
+    --radius: 0.75rem;
+    
+    /* JRMSU Shadows */
+    --shadow-blue: 215 100% 31% / 0.15;
+    --shadow-gold: 51 100% 50% / 0.2;
+
+    --sidebar-background: 0 0% 98%;
+
+    --sidebar-foreground: 240 5.3% 26.1%;
+
+    --sidebar-primary: 240 5.9% 10%;
+
+    --sidebar-primary-foreground: 0 0% 98%;
+
+    --sidebar-accent: 240 4.8% 95.9%;
+
+    --sidebar-accent-foreground: 240 5.9% 10%;
+
+    --sidebar-border: 220 13% 91%;
+
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  .dark {
+    --background: 222 47% 5%;
+    --foreground: 210 40% 98%;
+
+    --card: 217 33% 10%;
+    --card-foreground: 210 40% 98%;
+
+    --popover: 217 33% 10%;
+    --popover-foreground: 210 40% 98%;
+
+    --primary: 215 100% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 51 100% 45%;
+    --secondary-foreground: 222 47% 11%;
+
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    --accent: 146 45% 40%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+
+    --navy: 217 100% 20%;
+    --navy-foreground: 0 0% 100%;
+
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 215 100% 50%;
+    
+    --shadow-blue: 215 100% 40% / 0.3;
+    --shadow-gold: 51 100% 45% / 0.25;
+    --sidebar-background: 240 5.9% 10%;
+    --sidebar-foreground: 240 4.8% 95.9%;
+    --sidebar-primary: 224.3 76.3% 48%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 240 3.7% 15.9%;
+    --sidebar-accent-foreground: 240 4.8% 95.9%;
+    --sidebar-border: 240 3.7% 15.9%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Poppins', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }
+  
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+  
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+  
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Poppins', sans-serif;
+    font-weight: 600;
+  }
+}
+
+@layer utilities {
+  .shadow-jrmsu {
+    box-shadow: 0 4px 20px hsl(var(--shadow-blue));
+  }
+  
+  .shadow-jrmsu-gold {
+    box-shadow: 0 4px 16px hsl(var(--shadow-gold));
+  }
+  
+  .transition-smooth {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  /* Leaf (accent) color utilities */
+  .bg-leaf {
+    background-color: hsl(var(--accent));
+  }
+  
+  .text-leaf {
+    color: hsl(var(--accent));
+  }
+}

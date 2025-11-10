@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Generator - KC-24-A-12345</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode/1.5.3/qrcode.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        .container {
+            background: white;
+            color: #333;
+            padding: 40px;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+        .qr-container {
+            margin: 30px 0;
+            padding: 20px;
+            border: 3px dashed #007acc;
+            border-radius: 10px;
+            background: #f8f9fa;
+        }
+        #qrcode {
+            margin: 20px 0;
+        }
+        .user-info {
+            background: #e3f2fd;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            text-align: left;
+        }
+        .user-info h3 {
+            margin-top: 0;
+            color: #1976d2;
+        }
+        .data-structure {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: left;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            overflow-x: auto;
+        }
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: #005fa3;
+        }
+        .alert {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            color: #856404;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎓 JRMSU Library QR Code Generator</h1>
+        <h2>User: KC-24-A-12345</h2>
+        
+        <div class="user-info">
+            <h3>👤 User Information</h3>
+            <p><strong>Name:</strong> Ana Marie Santos</p>
+            <p><strong>User ID:</strong> KC-24-A-12345</p>
+            <p><strong>Type:</strong> Student</p>
+            <p><strong>Course:</strong> BSIT</p>
+            <p><strong>Year:</strong> 3rd Year</p>
+            <p><strong>Section:</strong> B</p>
+            <p><strong>Password:</strong> <code style="background: #ffeb3b; padding: 2px 6px; border-radius: 4px; color: #333;">ana123</code></p>
+        </div>
+
+        <div class="alert">
+            <strong>🔓 2FA Disabled:</strong> Two-factor authentication is bypassed for testing, but QR validation is fully active.
+        </div>
+
+        <div class="qr-container">
+            <h3>📱 Generated QR Code</h3>
+            <div id="qrcode"></div>
+            <button onclick="generateQR()">🔄 Generate QR Code</button>
+            <button onclick="downloadQR()">💾 Download QR Code</button>
+        </div>
+
+        <div class="data-structure">
+            <h4>📋 QR Code Data Structure:</h4>
+            <pre id="dataStructure"></pre>
+        </div>
+
+        <div style="text-align: left; margin-top: 30px;">
+            <h3>🧪 Testing Instructions:</h3>
+            <ol>
+                <li>Click "Generate QR Code" to create the QR code</li>
+                <li>Click "Download QR Code" to save it as PNG image</li>
+                <li>Use the downloaded QR code image with your scanner</li>
+                <li>QR authentication is active - must match KC-24-A-12345 user data exactly</li>
+                <li>2FA is disabled - no authenticator code required</li>
+                <li>You can also manually login with: <strong>KC-24-A-12345</strong> / <strong>ana123</strong></li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        // User data for KC-24-A-12345
+        const userData = {
+            // REQUIRED FIELDS
+            fullName: "Ana Marie Santos",
+            userId: "KC-24-A-12345",
+            userType: "student",
+            authCode: Math.random().toString().slice(2, 8),
+            encryptedToken: btoa(`KC-24-A-12345-${Date.now()}-auth`),
+            systemId: "JRMSU-LIBRARY",
+            timestamp: Date.now(),
+            systemTag: "JRMSU-KCS",
+            
+            // OPTIONAL FIELDS
+            department: "Information Technology",
+            course: "BSIT",
+            year: "3rd Year",
+            section: "B",
+            role: "Student",
+            
+            // LEGACY COMPATIBILITY
+            realTimeAuthCode: Math.random().toString().slice(2, 8),
+            encryptedPasswordToken: btoa(`KC-24-A-12345-${Date.now()}-token`),
+            
+            // METADATA
+            generatedBy: "Manual QR Generator",
+            version: "2.0"
+        };
+
+        function generateQR() {
+            // Clear previous QR code
+            document.getElementById('qrcode').innerHTML = '';
+            
+            // Update timestamps and auth codes for fresh QR
+            userData.authCode = Math.random().toString().slice(2, 8);
+            userData.realTimeAuthCode = Math.random().toString().slice(2, 8);
+            userData.timestamp = Date.now();
+            userData.encryptedToken = btoa(`KC-24-A-12345-${Date.now()}-auth`);
+            userData.encryptedPasswordToken = btoa(`KC-24-A-12345-${Date.now()}-token`);
+            
+            const qrData = JSON.stringify(userData);
+            
+            // Display data structure
+            document.getElementById('dataStructure').textContent = JSON.stringify(userData, null, 2);
+            
+            // Generate QR code
+            QRCode.toCanvas(document.getElementById('qrcode'), qrData, {
+                width: 300,
+                height: 300,
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                },
+                errorCorrectionLevel: 'H',
+                margin: 4
+            }, function (error) {
+                if (error) {
+                    console.error('QR generation error:', error);
+                    alert('Failed to generate QR code: ' + error.message);
+                } else {
+                    console.log('✅ QR code generated successfully');
+                }
+            });
+        }
+
+        function downloadQR() {
+            const canvas = document.querySelector('#qrcode canvas');
+            if (!canvas) {
+                alert('Please generate a QR code first');
+                return;
+            }
+            
+            // Create download link
+            const link = document.createElement('a');
+            link.download = 'KC-24-A-12345-QRCode.png';
+            link.href = canvas.toDataURL();
+            
+            // Trigger download
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            
+            console.log('📥 QR code downloaded successfully');
+        }
+
+        // Auto-generate QR code on page load
+        window.onload = function() {
+            generateQR();
+        };
+    </script>
+</body>
+</html>

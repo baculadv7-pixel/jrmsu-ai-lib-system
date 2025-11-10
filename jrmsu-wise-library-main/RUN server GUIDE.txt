@@ -1,0 +1,67 @@
+🎯 MANUAL RUNNING OF PORTS
+Terminal 1: Backend (Port 5000)
+powershell
+cd "C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\jrmsu-wise-library-main\python-backend"
+.venv\Scripts\activate
+python app.py
+Terminal 2: Main System (Port 8080)
+powershell
+cd "C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\jrmsu-wise-library-main"
+npm run dev
+Terminal 3: Mirror Page (Port 8081)
+powershell
+cd "C:\Users\provu\Desktop\Python learning files\Project library data system\Phase 2\jrmsu-ai-lib-system\mirror-login-page"
+npm run dev
+Terminal 4: Ollama AI (Port 11434)
+powershell
+ollama serve
+
+--------------------------------------------------------------------
+=======================================================================
+
+
+🗄️ DATABASE INFORMATION
+Database Name
+jrmsu_library
+Database Location (XAMPP)
+C:\xampp\mysql\data\jrmsu_library\
+This folder contains all your database tables and data files:
+
+students.frm / students.ibd - Student data
+admins.frm / admins.ibd - Admin data
+books.frm / books.ibd - Book catalog
+library_sessions.frm / library_sessions.ibd - Active sessions
+reservations.frm / reservations.ibd - Book reservations
+borrow_records.frm / borrow_records.ibd - Borrowing history
+Database Configuration
+Host:     localhost
+Port:     3306
+Database: jrmsu_library
+User:     root
+Password: (empty by default)
+Configuration Files
+Backend:     jrmsu-wise-library-main\python-backend\db.py
+Environment: jrmsu-wise-library-main\python-backend\.env
+🌐 ACCESS DATABASE
+Method 1: phpMyAdmin (Easiest)
+1. Open: http://localhost/phpmyadmin
+2. Click: "jrmsu_library" in left sidebar
+3. View/Edit tables
+Method 2: MySQL Command Line
+powershell
+cd C:\xampp\mysql\bin
+mysql -u root -p
+# Press Enter (no password)
+USE jrmsu_library;
+SHOW TABLES;
+Method 3: MySQL Workbench
+Connection:
+- Hostname: localhost
+- Port: 3306
+- Username: root
+- Password: (empty)
+📚 DOCUMENTATION FILES
+MANUAL_START_GUIDE.md - Step-by-step manual startup
+DATABASE_SETUP_GUIDE.md - Complete database information
+run_all_servers.bat - Automated startup
+kill_ports.bat - Kill busy ports

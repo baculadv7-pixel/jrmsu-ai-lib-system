@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>QR Code Debug Test</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 20px; border: 1px solid #ccc; border-radius: 8px; }
+        .qr-container { text-align: center; margin: 20px 0; }
+        canvas { border: 1px solid #000; }
+        textarea { width: 100%; height: 200px; font-family: monospace; }
+        button { padding: 10px 20px; margin: 5px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        button:hover { background: #0056b3; }
+        .success { color: green; font-weight: bold; }
+        .error { color: red; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔍 QR Code Authentication Debug Test</h1>
+        
+        <div class="section">
+            <h2>📋 Sample QR Data Structure</h2>
+            <p>This is the minimal QR structure your system should generate:</p>
+            <textarea id="qrData" readonly>{
+  "fullName": "Ana Marie Santos",
+  "userId": "KC-24-A-12345",
+  "userType": "student",
+  "systemId": "JRMSU-LIBRARY",
+  "systemTag": "JRMSU-KCS",
+  "timestamp": 1640995200000,
+  "sessionToken": "S0MtMjQtQS0xMjM0NS0xNjQwOTk1MjAwMDAw",
+  "twoFactorKey": "JRMSULIB2FA123456789",
+  "twoFactorSetupKey": "JRMSULIB2FA123456789"
+}</textarea>
+            <br>
+            <button onclick="generateQR()">🎯 Generate QR Code</button>
+            <button onclick="updateTimestamp()">🔄 Update Timestamp</button>
+        </div>
+        
+        <div class="section">
+            <h2>🔧 Generated QR Code</h2>
+            <div class="qr-container">
+                <canvas id="qrCanvas" width="300" height="300"></canvas>
+            </div>
+            <p><strong>Instructions:</strong> Save this QR code image and try scanning it with your QR login system.</p>
+        </div>
+        
+        <div class="section">
+            <h2>🧪 Manual Validation Test</h2>
+            <p>Paste scanned QR data here to test validation:</p>
+            <textarea id="scannedData" placeholder="Paste QR code JSON data here..."></textarea>
+            <br>
+            <button onclick="validateQR()">✅ Validate QR Structure</button>
+            <div id="validationResult"></div>
+        </div>
+        
+        <div class="section">
+            <h2>🎯 Test Different User Types</h2>
+            <button onclick="generateAdminQR()">👨‍💼 Generate Admin QR (JRMSU-KCL)</button>
+            <button onclick="generateStudentQR()">🎓 Generate Student QR (JRMSU-KCS)</button>
+        </div>
+        
+        <div class="section">
+            <h2>🔍 Debug Info</h2>
+            <div id="debugInfo"></div>
+        </div>
+    </div>
+
+    <script>
+        // Update timestamp to current time
+        function updateTimestamp() {
+            const data = JSON.parse(document.getElementById('qrData').value);
+            data.timestamp = Date.now();
+            data.sessionToken = btoa(data.userId + '-' + data.timestamp);
+            document.getElementById('qrData').value = JSON.stringify(data, null, 2);
+            generateQR();
+            console.log('Updated QR data with current timestamp:', data);
+        }
+        
+        // Generate QR code from current data
+        function generateQR() {
+            const qrData = document.getElementById('qrData').value;
+            const canvas = document.getElementById('qrCanvas');
+            
+            QRCode.toCanvas(canvas, qrData, { 
+                width: 300, 
+                margin: 2,
+                errorCorrectionLevel: 'H',
+                color: {
+                    dark: '#000000',
+                    light: '#FFFFFF'
+                }
+            }, function (error) {
+                if (error) {
+                    console.error('QR Generation Error:', error);
+                    document.getElementById('debugInfo').innerHTML = '<p class="error">❌ QR Generation Failed: ' + error + '</p>';
+                } else {
+                    console.log('✅ QR Code generated successfully');
+                    document.getElementById('debugInfo').innerHTML = '<p class="success">✅ QR Code generated successfully! Try scanning it now.</p>';
+                    
+                    // Add logo overlay (simulated)
+                    addLogoToQR(canvas);
+                }
+            });
+        }
+        
+        // Add transparent logo overlay to QR code
+        function addLogoToQR(canvas) {
+            const ctx = canvas.getContext('2d');
+            const size = canvas.width;
+            const centerX = size / 2;
+            const centerY = size / 2;
+            const logoSize = Math.floor(size * 0.25);
+            const radius = logoSize / 2;
+            
+            // Clear center area (simulate logo space)
+            ctx.save();
+            ctx.globalCompositeOperation = 'destination-out';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.restore();
+            
+            // Add transparent background
+            ctx.save();
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, radius, 0, 2 * Math.PI);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.fill();
+            
+            // Add logo text
+            ctx.globalAlpha = 0.8;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.font = 'bold 16px Arial';
+            ctx.fillStyle = 'rgba(30, 64, 175, 0.9)';
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.lineWidth = 2;
+            
+            const data = JSON.parse(document.getElementById('qrData').value);
+            const logoText = data.systemTag || 'JRMSU';
+            ctx.strokeText(logoText, centerX, centerY);
+            ctx.fillText(logoText, centerX, centerY);
+            ctx.restore();
+            
+            console.log('🎨 Logo overlay added to QR code');
+        }
+        
+        // Validate scanned QR data
+        function validateQR() {
+            const scannedData = document.getElementById('scannedData').value.trim();
+            const resultDiv = document.getElementById('validationResult');
+            
+            if (!scannedData) {
+                resultDiv.innerHTML = '<p class="error">❌ Please paste QR data to validate</p>';
+                return;
+            }
+            
+            try {
+                const parsed = JSON.parse(scannedData);
+                console.log('Parsed QR data:', parsed);
+                
+                // Validate required fields
+                const requiredFields = ['fullName', 'userId', 'userType', 'systemId', 'systemTag'];
+                const missing = requiredFields.filter(field => !parsed[field]);
+                
+                if (missing.length > 0) {
+                    resultDiv.innerHTML = '<p class="error">❌ Missing required fields: ' + missing.join(', ') + '</p>';
+                    return;
+                }
+                
+                // Check system ID
+                if (parsed.systemId !== 'JRMSU-LIBRARY') {
+                    resultDiv.innerHTML = '<p class="error">❌ Invalid system ID: ' + parsed.systemId + '</p>';
+                    return;
+                }
+                
+                // Check timestamp age
+                const age = parsed.timestamp ? (Date.now() - parsed.timestamp) / 1000 / 60 : 0;
+                
+                let validation = '<div class="success">';
+                validation += '<p>✅ QR Code validation PASSED!</p>';
+                validation += '<p><strong>User:</strong> ' + parsed.fullName + '</p>';
+                validation += '<p><strong>ID:</strong> ' + parsed.userId + '</p>';
+                validation += '<p><strong>Type:</strong> ' + parsed.userType + '</p>';
+                validation += '<p><strong>System Tag:</strong> ' + parsed.systemTag + '</p>';
+                validation += '<p><strong>Has Session Token:</strong> ' + (parsed.sessionToken ? 'Yes' : 'No') + '</p>';
+                validation += '<p><strong>Has 2FA Key:</strong> ' + (parsed.twoFactorKey ? 'Yes' : 'No') + '</p>';
+                validation += '<p><strong>Age:</strong> ' + age.toFixed(1) + ' minutes</p>';
+                validation += '</div>';
+                
+                resultDiv.innerHTML = validation;
+                
+            } catch (error) {
+                resultDiv.innerHTML = '<p class="error">❌ Invalid JSON: ' + error.message + '</p>';
+            }
+        }
+        
+        // Generate admin QR
+        function generateAdminQR() {
+            const adminData = {
+                fullName: "John Mark Santos",
+                userId: "KCL-00001",
+                userType: "admin",
+                systemId: "JRMSU-LIBRARY", 
+                systemTag: "JRMSU-KCL",
+                timestamp: Date.now(),
+                sessionToken: btoa("KCL-00001-" + Date.now()),
+                twoFactorKey: "JRMSULIB2FA123456789",
+                twoFactorSetupKey: "JRMSULIB2FA123456789"
+            };
+            
+            document.getElementById('qrData').value = JSON.stringify(adminData, null, 2);
+            generateQR();
+        }
+        
+        // Generate student QR  
+        function generateStudentQR() {
+            const studentData = {
+                fullName: "Ana Marie Santos",
+                userId: "KC-24-A-12345",
+                userType: "student",
+                systemId: "JRMSU-LIBRARY",
+                systemTag: "JRMSU-KCS", 
+                timestamp: Date.now(),
+                sessionToken: btoa("KC-24-A-12345-" + Date.now()),
+                twoFactorKey: "JRMSULIB2FA123456789",
+                twoFactorSetupKey: "JRMSULIB2FA123456789"
+            };
+            
+            document.getElementById('qrData').value = JSON.stringify(studentData, null, 2);
+            generateQR();
+        }
+        
+        // Generate initial QR on page load
+        window.onload = function() {
+            updateTimestamp();
+        };
+    </script>
+</body>
+</html>

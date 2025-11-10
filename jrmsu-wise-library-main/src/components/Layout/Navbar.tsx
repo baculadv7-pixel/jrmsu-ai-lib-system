@@ -1,0 +1,373 @@
+import { Bell, LogOut, PanelLeft } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import logo from "@/assets/jrmsu-logo.jpg";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/context/AuthContext";
+import { useEffect, useMemo, useState } from "react";
+import { NotificationsService } from "@/services/notifications";
+import { NotificationsAPI, type NotificationItem } from "@/services/notificationsApi";
+import { SettingsDropdown } from "@/components/settings/SettingsDropdown";
+import { getViewportMode } from "@/hooks/useViewportMode";
+import { API } from "@/config/api";
+import { PasswordResetOverlay } from "@/components/notifications/PasswordResetOverlay";
+
+interface NavbarProps {
+  userType: "student" | "admin";
+  theme?: "light" | "dark" | "system";
+  onThemeChange?: (theme: "light" | "dark" | "system") => void;
+}
+
+const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
+  const navigate = useNavigate();
+  const { signOut, user } = useAuth();
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [unread, setUnread] = useState(0);
+  const [filter, setFilter] = useState<'all'|'unread'>('all');
+  const [overlayOpen, setOverlayOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string|undefined>(undefined);
+  const [selected, setSelected] = useState<NotificationItem|undefined>(undefined);
+  const [passwordResetOverlayOpen, setPasswordResetOverlayOpen] = useState(false);
+  const [passwordResetData, setPasswordResetData] = useState<any>(null);
+
+  const reload = async (f: 'all'|'unread'=filter) => {
+    if (!user?.id) return;
+    
+    // Use local NotificationsService directly (primary source)
+    const local = NotificationsService.list(user?.id);
+    const items = local.map(n=>({
+      id: n.id,
+      user_id: user?.id || 'guest',
+      title: 'Notification',
+      body: n.message,
+      type: n.type,
+      meta: n.metadata,
+      created_at: new Date(n.createdAt).getTime()/1000,
+      read: n.status === 'read',
+    })) as NotificationItem[];
+    
+    // Filter if needed
+    const filtered = f === 'unread' ? items.filter(n => !n.read) : items;
+    setNotifications(filtered.sort((a,b)=> (a.created_at < b.created_at ? 1 : -1)));
+    setUnread(local.filter(n=>n.status==='unread').length);
+    
+    // Try to sync with backend API (optional, non-blocking)
+    try {
+      const res = await NotificationsAPI.list({ userId: user.id, filter: f, page: 1, limit: 25 });
+      // Merge backend notifications if available
+      const backendItems = res.items.slice().sort((a,b)=> (a.created_at < b.created_at ? 1 : -1));
+      if (backendItems.length > 0) {
+        // Combine local and backend, remove duplicates
+        const combined = [...items, ...backendItems];
+        const unique = combined.filter((item, index, self) => 
+          index === self.findIndex((t) => t.id === item.id)
+        );
+        setNotifications(unique.sort((a,b)=> (a.created_at < b.created_at ? 1 : -1)));
+      }
+    } catch (err) {
+      // Backend not available, use local only (already set above)
+      console.log('Using local notifications only');
+    }
+  };
+
+  const toggleSidebar = () => {
+    const width = typeof window !== 'undefined' ? window.innerWidth : 1280;
+    const mode = getViewportMode(width);
+    try {
+      const ch = new BroadcastChannel('jrmsu_sidebar_channel');
+      if (mode === 'mobile') {
+        const KEY_M = 'jrmsu_sidebar_mobile_open';
+        const isOpen = localStorage.getItem(KEY_M) === 'true';
+        const next = !isOpen;
+        localStorage.setItem(KEY_M, String(next));
+        ch.postMessage({ type: 'mobile', value: next });
+      } else {
+        const KEY = 'jrmsu_sidebar_collapsed';
+        const current = localStorage.getItem(KEY) === 'true';
+        const next = !current;
+        localStorage.setItem(KEY, String(next));
+        ch.postMessage({ type: 'toggle', value: next });
+      }
+      ch.close();
+    } catch {
+      // Fallback if BroadcastChannel unsupported: set localStorage only
+      if (mode === 'mobile') {
+        const KEY_M = 'jrmsu_sidebar_mobile_open';
+        const isOpen = localStorage.getItem(KEY_M) === 'true';
+        localStorage.setItem(KEY_M, String(!isOpen));
+      } else {
+        const KEY = 'jrmsu_sidebar_collapsed';
+        const current = localStorage.getItem(KEY) === 'true';
+        localStorage.setItem(KEY, String(!current));
+      }
+    }
+  };
+
+  useEffect(() => {
+    if (!user?.id) return;
+    reload();
+    
+    // Subscribe to local NotificationsService updates
+    const unsubscribeLocal = NotificationsService.subscribe(() => {
+      console.log('📢 Notification update detected, reloading...');
+      reload();
+    });
+    
+    // Also connect to backend API (optional)
+    const disconnect = NotificationsAPI.connect(user.id, {
+      onNew: (n) => setNotifications((prev) => [n, ...prev.filter(p=>p.id!==n.id)]),
+      onUpdate: (n) => setNotifications((prev) => prev.map(p=>p.id===n.id?n:p)),
+      onMarkAll: () => setNotifications((prev)=>prev.map(p=>({...p, read: true}))),
+    });
+    
+    return () => {
+      unsubscribeLocal();
+      disconnect();
+    };
+  }, [user?.id]);
+
+  const unreadCount = useMemo(() => unread ?? notifications.filter((n) => !n.read).length, [unread, notifications]);
+  const filteredNotifications = useMemo(() => (filter === 'unread' ? notifications.filter(n=>!n.read) : notifications), [notifications, filter]);
+
+  const handleMarkAllRead = async () => {
+    try {
+      if (!user?.id) return;
+      await NotificationsAPI.markAllRead(user.id);
+      await reload(filter);
+    } catch {
+      const receiverId = user?.id || 'ADMIN';
+      NotificationsService.markAllRead(receiverId);
+      reload(filter);
+    }
+  };
+
+  const openNotification = async (id: string) => {
+    if (!user?.id) return;
+    try {
+      const n = await NotificationsAPI.get(user.id, id);
+      
+      // Check if this is a password reset request
+      if (n.type === 'password_reset_request' && n.meta) {
+        setPasswordResetData({
+          requesterId: n.meta.requesterId,
+          requesterName: n.meta.requesterName,
+          requesterEmail: n.meta.requesterEmail,
+          requestTime: n.meta.requestTime || new Date(n.created_at * 1000).toLocaleString(),
+          notificationId: n.id
+        });
+        setPasswordResetOverlayOpen(true);
+        // Mark as read
+        if (!n.read) { await NotificationsAPI.markRead(user.id, [id]); await reload(filter); }
+      } else {
+        // Regular notification
+        setSelected(n);
+        setSelectedId(id);
+        setOverlayOpen(true);
+        // Mark as read if not already
+        if (!n.read) { await NotificationsAPI.markRead(user.id, [id]); await reload(filter); }
+      }
+    } catch {}
+  };
+
+  const handleLogout = () => {
+    signOut();
+    navigate("/");
+  };
+
+  return (
+    <nav className="bg-navy border-b-2 border-secondary sticky top-0 z-[60]">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex items-center justify-between h-16">
+          <div className="flex items-center gap-3">
+            <img src={logo} alt="JRMSU" className="h-10 w-10 object-contain rounded-md bg-navy" />
+            <div className="text-navy-foreground">
+              <h1 className="text-lg font-bold">JRMSU Library</h1>
+              <p className="text-xs text-secondary">AI-Powered System</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            {/* Main menu toggle - grows when sidebar is collapsed */}
+            <Button variant="ghost" size="icon" onClick={toggleSidebar} className="text-navy-foreground hover:bg-navy-foreground/10">
+              {/* reactively size via inline style based on localStorage */}
+              <PanelLeft className="transition-all" style={{ height: (localStorage.getItem('jrmsu_sidebar_collapsed') === 'true') ? 24 : 20, width: (localStorage.getItem('jrmsu_sidebar_collapsed') === 'true') ? 24 : 20 }} />
+            </Button>
+
+            {/* Notification Bell */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative text-navy-foreground hover:bg-navy-foreground/10">
+                  <Bell className="h-5 w-5" />
+                  {unreadCount > 0 && (
+                    <Badge className="absolute -top-1 -right-1 h-5 w-5 flex items-center justify-center p-0 bg-secondary text-navy text-xs">
+                      {unreadCount}
+                    </Badge>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[90vw] sm:w-[28rem] md:w-[32rem] lg:w-[36rem] max-w-[95vw] p-0">
+                {/* Header - Sticky */}
+                <div className="p-3 sm:p-4 border-b flex flex-col sm:flex-row items-start sm:items-center gap-2 sticky top-0 bg-background z-10">
+                  <h3 className="font-semibold text-base sm:text-lg">Notifications</h3>
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 sm:ml-auto">
+                    <Button size="sm" variant={filter==='all'?'default':'outline'} onClick={() => { setFilter('all'); reload('all'); }} className="text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3">
+                      All
+                    </Button>
+                    <Button size="sm" variant={filter==='unread'?'default':'outline'} onClick={() => { setFilter('unread'); reload('unread'); }} className="text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3">
+                      Unread ({unreadCount})
+                    </Button>
+                    <Button size="sm" onClick={handleMarkAllRead} className="text-xs sm:text-sm h-7 sm:h-8 px-2 sm:px-3">
+                      Mark all read
+                    </Button>
+                  </div>
+                </div>
+                
+                {/* Scrollable Content Area */}
+                <div className="max-h-[60vh] sm:max-h-[70vh] overflow-y-auto overflow-x-hidden">
+                  {filteredNotifications.slice(0, 50).map((n) => (
+                    <DropdownMenuItem key={n.id} onClick={() => openNotification(n.id)} className="cursor-pointer hover:bg-muted/50 focus:bg-muted/50 px-3 sm:px-4 py-3 border-b last:border-b-0">
+                      <div className="flex flex-col gap-1.5 w-full">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm sm:text-base font-medium line-clamp-2 flex-1">{n.title || 'Notification'}</p>
+                          {!n.read && <span className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-blue-600 flex-shrink-0 mt-1" />}
+                        </div>
+                        <p className="text-xs sm:text-sm text-muted-foreground line-clamp-3">{n.body}</p>
+                        <p className="text-xs text-muted-foreground/80">{new Date(n.created_at*1000).toLocaleString()}</p>
+                      </div>
+                    </DropdownMenuItem>
+                  ))}
+                  {filteredNotifications.length === 0 && (
+                    <div className="p-6 sm:p-8 text-center text-sm text-muted-foreground">
+                      No notifications
+                    </div>
+                  )}
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <Dialog open={overlayOpen} onOpenChange={setOverlayOpen}>
+              <DialogContent className="sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle>{selected?.title || 'Notification'}</DialogTitle>
+                  <DialogDescription>{new Date((selected?.created_at||0)*1000).toLocaleString()}</DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <p className="text-sm whitespace-pre-wrap">{selected?.body}</p>
+                  
+                  {/* Password Reset Request Details */}
+                  {selected?.type === 'password_reset_request' && selected?.meta && (
+                    <div className="border rounded-lg p-4 space-y-3 bg-muted/50">
+                      <h4 className="font-semibold text-sm">Request Details</h4>
+                      <div className="space-y-2 text-sm">
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">User ID:</span>
+                          <span className="font-medium">{selected.meta.requesterId}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Full Name:</span>
+                          <span className="font-medium">{selected.meta.requesterName}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Email:</span>
+                          <span className="font-medium">{selected.meta.requesterEmail}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span className="text-muted-foreground">Request Time:</span>
+                          <span className="font-medium">{new Date(selected.meta.requestTime).toLocaleString()}</span>
+                        </div>
+                      </div>
+                      
+                      {/* Grant/Decline Buttons */}
+                      <div className="flex gap-2 pt-2">
+                        <Button 
+                          className="flex-1 bg-green-600 hover:bg-green-700" 
+                          onClick={async ()=>{
+                            try{
+                              await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{
+                                method:'POST',
+                                headers:{'Content-Type':'application/json'},
+                                body:JSON.stringify({
+                                  requestId: selected.meta.requesterId, 
+                                  action:'grant', 
+                                  adminId: user?.id||'ADMIN'
+                                })
+                              });
+                              setOverlayOpen(false);
+                              reload();
+                            }catch{}
+                          }}
+                        >
+                          Grant Reset
+                        </Button>
+                        <Button 
+                          className="flex-1" 
+                          variant="destructive" 
+                          onClick={async ()=>{
+                            try{
+                              await fetch(`${API.BACKEND.BASE}/api/auth/admin-respond`,{
+                                method:'POST',
+                                headers:{'Content-Type':'application/json'},
+                                body:JSON.stringify({
+                                  requestId: selected.meta.requesterId, 
+                                  action:'decline', 
+                                  adminId: user?.id||'ADMIN'
+                                })
+                              });
+                              setOverlayOpen(false);
+                              reload();
+                            }catch{}
+                          }}
+                        >
+                          Decline
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </DialogContent>
+            </Dialog>
+
+            {/* Settings Dropdown */}
+            <SettingsDropdown 
+              theme={theme} 
+              onThemeChange={onThemeChange || (() => {})} 
+            />
+
+            {/* Logout Button */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              className="text-navy-foreground hover:bg-navy-foreground/10"
+            >
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </Button>
+          </div>
+        </div>
+      </div>
+      
+      {/* Password Reset Overlay */}
+      {passwordResetData && (
+        <PasswordResetOverlay
+          isOpen={passwordResetOverlayOpen}
+          onClose={() => {
+            setPasswordResetOverlayOpen(false);
+            setPasswordResetData(null);
+            reload();
+          }}
+          requestData={passwordResetData}
+        />
+      )}
+    </nav>
+  );
+};
+
+export default Navbar;

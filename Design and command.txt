@@ -1,0 +1,77 @@
+READ, ANALYZE, AND UNDERSTAND the entire project plan exactly as provided (JRMSU AI-Library System.txt). 
+Do NOT change, remove, shorten, or rearrange any feature, label, or rule.  
+Follow the plan precisely and implement all modules, UI rules, database schema, and behaviors as written.  
+If any part is unclear, analyze the text and make the safest, most faithful implementation decision that preserves all requirements.  
+Confirm you have read and will strictly follow the plan before generating code or files.
+
+
+“Create a professional JRMSU Library Management System web application with the royal blue, gold, and white color scheme based on the JRMSU logo (download.jpg).
+Use a modern, eye-friendly UI with clean shadows and responsive design.
+Follow all previously detailed modules (Dashboard, Book Inventory, Borrow/Return History, Reports, Profile with QR code, Authentication and 2FA settings, Floating AI Assistant, Student Registration with age/birthdate, etc.).
+Use #1E3A8A, #3B82F6, #FACC15, #F9FAFB, and #E5E7EB as primary palette colors.
+Ensure the navigation bar, notification bell, AI assistant, and QR scan UI follow the same visual consistency.”
+
+
+🧭 Design Style Guide
+
+Layout: Flat modern interface with rounded corners (border-radius: 10px–15px).
+
+Font Family: Poppins, Inter, or Nunito Sans (clean, modern, and highly readable).
+
+Buttons:
+
+Primary Button → Blue background (#0033A0), white text.
+
+Hover → Slight gold glow (#FFD700) or lighter blue (#3366CC).
+
+Navbar:
+
+Deep navy background with gold border accent.
+
+Active tab highlighted in bright blue.
+
+Dashboard Cards:
+
+White background with soft blue shadows (rgba(0, 51, 160, 0.15)).
+
+Minimal gold accent lines or icons.
+
+AI Assistant Bubble:
+
+Circular, gradient blue background (#0033A0 → #3366CC).
+
+Gold chat icon or wave animation when active.
+
+Notification Bell:
+
+Gold with subtle white glow on hover.
+
+Dark Mode (optional):
+
+Background: #0F172A
+
+Text: #E2E8F0
+
+Blue accents remain, but slightly desaturated to prevent glare.
+
+🌟 Overall Design Feel
+
+Inspiration: Academic, elegant, and intelligent.
+
+Tone: Calm blue-based design that aligns with JRMSU’s academic prestige.
+
+Effect: Professional, minimalistic, and not painful to the eyes — ideal for long reading and use.
+
+Accessibility: Meets WCAG contrast guidelines for readability.
+
+
+| Color Role                 | Hex Code  | Description                                                                                              |
+| -------------------------- | --------- | -------------------------------------------------------------------------------------------------------- |
+| **Primary Blue**           | `#0033A0` | The main JRMSU royal blue. Used for header bars, buttons, and highlights.                                |
+| **Secondary Gold**         | `#FFD700` | Accent color inspired by the JRMSU torch and text. Use for icons, hover effects, or active states.       |
+| **Leaf Green**             | `#2E8B57` | Represents growth and education. Use for confirmation messages, success alerts, and progress indicators. |
+| **Soft White / Off White** | `#F9FAFB` | Background for pages to reduce eye strain (better than pure white).                                      |
+| **Deep Navy**              | `#001F54` | For sidebars, navbars, and footer backgrounds. Provides contrast to main blue.                           |
+| **Cool Gray**              | `#D1D5DB` | For dividers, table borders, and inactive UI elements.                                                   |
+| **Text Gray**              | `#374151` | For readable dark text that’s softer than pure black.                                                    |
+| **Error Red**              | `#DC2626` | For warning or error notifications (used minimally).                                                     |

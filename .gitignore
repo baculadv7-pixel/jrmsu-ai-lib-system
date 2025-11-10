@@ -1,0 +1,65 @@
+# ==== PYTHON ====
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.dll
+*.log
+*.sqlite3
+
+# Virtual environments (any folder name)
+venv/
+.venv/
+env/
+ENV/
+*/venv/
+*/.venv/
+*/env/
+*/ENV/
+
+# ==== NODE / WEB ====
+node_modules/
+*/node_modules/
+dist/
+build/
+*.lock
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ==== FRONTEND FRAMEWORKS ====
+.next/
+.nuxt/
+out/
+coverage/
+
+# ==== EDITOR / OS ====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ==== ENVIRONMENT & CONFIG ====
+*.env
+.env.local
+.env.production
+.env.development
+
+# ==== PROJECT OVERRIDES (include dependencies for upload) ====
+# Allow committing Node modules (mirror and main frontends)
+!node_modules/**
+!*/node_modules/**
+
+# Allow committing Python virtual environments (backend venvs)
+!venv/**
+!.venv/**
+!env/**
+!ENV/**
+!*/venv/**
+!*/.venv/**
+!*/env/**
+!*/ENV/**
+
+# Allow committing Yarn lock if present
+!yarn.lock
