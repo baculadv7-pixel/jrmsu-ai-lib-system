@@ -2114,6 +2114,58 @@ def put_admin_qr_code(admin_id: str):
         _emit('admins.updated', admin_id, {'qrCodeData': data})
         return jsonify(ok=True)
 
+# ---------- Courses Endpoint (Dynamic by department) ----------
+
+@app.route('/api/courses', methods=['GET'])
+def api_courses():
+    """Return list of courses. Optional query param department=<code> (cte,cba,cafse,scje,ccs)"""
+    dept = (request.args.get('department') or '').strip().lower()
+    # Fallback mapping used when DB is unavailable or courses table absent
+    fallback = {
+        'cte': [
+            { 'code': 'bsfil', 'name': 'BS Filipino' },
+            { 'code': 'bssci', 'name': 'BS Science' },
+            { 'code': 'bsee',  'name': 'BS Elementary Ed' },
+            { 'code': 'bsmath','name': 'BS Math' },
+            { 'code': 'bspe',  'name': 'BS PE' },
+        ],
+        'cba': [
+            { 'code': 'bhm',   'name': 'BS Hospitality Management' },
+            { 'code': 'bbahrm','name': 'BSBA – HR Management' },
+            { 'code': 'bsab',  'name': 'BS Agri-Business' },
+        ],
+        'cafse': [
+            { 'code': 'bsa',   'name': 'BS Agriculture' },
+            { 'code': 'bsf',   'name': 'BS Forestry' },
+            { 'code': 'bsabe', 'name': 'BS Agri & Biosystems Eng.' },
+        ],
+        'scje': [
+            { 'code': 'none',  'name': 'No course selection required' },
+        ],
+        'ccs': [
+            { 'code': 'bsis',  'name': 'BS Information System' },
+            { 'code': 'bscs',  'name': 'BS Computer Science' },
+        ],
+    }
+    try:
+        # Try DB first, if a courses table exists with (department, code, name)
+        q = "SELECT department, code, name FROM courses"
+        rows = execute_query(q, fetch_all=True) or []
+        if rows:
+            items = [ { 'department': (r.get('department') or '').lower(), 'code': r.get('code'), 'name': r.get('name') } for r in rows ]
+            if dept:
+                items = [i for i in items if i.get('department') == dept]
+            return jsonify(items=items)
+    except Exception:
+        pass
+    # Fallback
+    if dept:
+        return jsonify(items=fallback.get(dept) or [])
+    all_items = []
+    for k, lst in fallback.items():
+        all_items.extend([{ **it, 'department': k } for it in lst])
+    return jsonify(items=all_items)
+
 # ---------- Account Recovery & 2FA Backup ----------
 
 @app.route('/api/users/<user_id>/recovery-email', methods=['GET'])

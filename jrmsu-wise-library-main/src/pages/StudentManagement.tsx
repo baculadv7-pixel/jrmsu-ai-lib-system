@@ -13,6 +13,8 @@ import { databaseService, User } from "@/services/database";
 import { useToast } from "@/hooks/use-toast";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StudentProfileModal } from "@/components/student/StudentProfileModal";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { connectOverlaysRealtime, OverlayEvent } from "@/services/overlaysRealtime";
 
 const StudentManagement = () => {
   const navigate = useNavigate();
@@ -34,6 +36,14 @@ const StudentManagement = () => {
   // Library session tracking
   const [activeLibraryStudents, setActiveLibraryStudents] = useState<number>(0);
 
+  // Overlay modals state
+  const [showTotalOverlay, setShowTotalOverlay] = useState(false);
+  const [showFilteredOverlay, setShowFilteredOverlay] = useState(false);
+  const [showActiveOverlay, setShowActiveOverlay] = useState(false);
+  const [showQROverlay, setShowQROverlay] = useState(false);
+  const [overlaySearch, setOverlaySearch] = useState("");
+  const [activeSessionItems, setActiveSessionItems] = useState<any[]>([]);
+
   // Load active library sessions
   const loadActiveLibrarySessions = async () => {
     try {
@@ -45,6 +55,14 @@ const StudentManagement = () => {
     } catch (error) {
       console.error('Failed to load active library sessions:', error);
     }
+  };
+
+  const fetchActiveItems = async () => {
+    try {
+      const response = await fetch('http://localhost:5000/api/library/active-sessions?userType=student');
+      const j = await response.json();
+      setActiveSessionItems(j.items || []);
+    } catch { setActiveSessionItems([]); }
   };
 
   // Load students from database and backend
@@ -141,7 +159,7 @@ const StudentManagement = () => {
 
   const handleAddStudent = () => {
     // Pass context that this registration was initiated from Student Management
-    navigate("/register/personal?type=student&from=student-management");
+    navigate("/register?role=student&from=student-management");
   };
 
   const toggleSort = () => {
@@ -175,6 +193,22 @@ const StudentManagement = () => {
     setSelectedStudent(null);
   };
 
+  // Realtime: refresh overlays while open
+  useEffect(() => {
+    const anyOpen = showActiveOverlay || showQROverlay || showFilteredOverlay || showTotalOverlay;
+    if (!anyOpen) return;
+    const disconnect = connectOverlaysRealtime(async (ev: OverlayEvent) => {
+      if (ev === 'session_update' && showActiveOverlay) {
+        await fetchActiveItems();
+        await loadActiveLibrarySessions();
+      } else if ((ev === 'students.updated' || ev === 'user.updated') && (showQROverlay || showFilteredOverlay || showTotalOverlay)) {
+        loadStudents();
+      }
+    });
+    return () => disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showActiveOverlay, showQROverlay, showFilteredOverlay, showTotalOverlay]);
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar userType={userType} />
@@ -199,7 +233,7 @@ const StudentManagement = () => {
 
             {/* Real-Time Statistics */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowTotalOverlay(true); }}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Total Students
@@ -212,7 +246,7 @@ const StudentManagement = () => {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowFilteredOverlay(true); }}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Filtered Results
@@ -225,7 +259,7 @@ const StudentManagement = () => {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={async () => { setOverlaySearch(""); await fetchActiveItems(); setShowActiveOverlay(true); }}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Active Students (In Library)
@@ -237,7 +271,8 @@ const StudentManagement = () => {
                     <span className="text-3xl font-bold text-green-600">{activeLibraryStudents}</span>
                   </div>
                 </CardContent>
-              </Card>              <Card className="shadow-jrmsu">
+              </Card>
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowQROverlay(true); }}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     QR Active
@@ -454,6 +489,144 @@ const StudentManagement = () => {
           onSave={handleSaveStudent}
         />
       )}
+      {/* Overlays */}
+      <Dialog open={showTotalOverlay} onOpenChange={setShowTotalOverlay}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Total Students</DialogTitle>
+            <DialogDescription>All student records</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search by name, ID, email, course" value={overlaySearch} onChange={(e) => setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto">
+            <div className="grid grid-cols-5 gap-2 px-1 text-xs font-medium sticky top-0 bg-background py-2 border-b">
+              <div>Date</div>
+              <div>Time</div>
+              <div>User ID</div>
+              <div>Fullname</div>
+              <div>Course</div>
+            </div>
+            <div className="divide-y text-sm">
+              {students
+                .filter(s => {
+                  const q = overlaySearch.toLowerCase();
+                  return !q || s.fullName.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.email||'').toLowerCase().includes(q) || (s.course||'').toLowerCase().includes(q);
+                })
+                .sort((a,b) => (new Date(b.createdAt).getTime()) - (new Date(a.createdAt).getTime()))
+                .map((s) => {
+                  const d = new Date(s.createdAt);
+                  const date = d.toLocaleDateString('en-US', { month:'2-digit', day:'2-digit', year:'numeric' });
+                  const time = d.toLocaleTimeString('en-US', { hour12: true, hour:'2-digit', minute:'2-digit', second:'2-digit' }).replace('AM','A.M.').replace('PM','P.M.');
+                  return (
+                    <div key={s.id+String(s.createdAt)} className="grid grid-cols-5 gap-2 px-1 py-2">
+                      <div>{date}</div>
+                      <div>{time}</div>
+                      <div className="font-mono text-xs">{s.id}</div>
+                      <div>{s.lastName}, {s.firstName} {s.middleName ? s.middleName.charAt(0)+'.' : ''}</div>
+                      <div>{s.course || '—'}</div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showFilteredOverlay} onOpenChange={setShowFilteredOverlay}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Filtered Students</DialogTitle>
+            <DialogDescription>Matching current filters</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search within filtered results" value={overlaySearch} onChange={(e) => setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto divide-y text-sm">
+            {filteredStudents
+              .filter(s => {
+                const q = overlaySearch.toLowerCase();
+                return !q || s.fullName.toLowerCase().includes(q) || s.id.toLowerCase().includes(q) || (s.email||'').toLowerCase().includes(q) || (s.course||'').toLowerCase().includes(q);
+              })
+              .map(s => (
+                <div key={s.id} className="flex items-center justify-between gap-3 py-2 px-1">
+                  <div className="w-32 text-xs">{new Date(s.createdAt).toLocaleDateString('en-US')}</div>
+                  <div className="w-28 text-xs">{new Date(s.createdAt).toLocaleTimeString('en-US').replace('AM','A.M.').replace('PM','P.M.')}</div>
+                  <div className="flex-1 font-medium">{s.lastName}, {s.firstName} {s.middleName ? s.middleName.charAt(0)+'.' : ''}</div>
+                  <div className="w-40 font-mono text-xs">{s.id}</div>
+                  <div className="w-24 text-right">{s.course || '—'}</div>
+                </div>
+              ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showActiveOverlay} onOpenChange={(open) => { setShowActiveOverlay(open); if (!open) return; fetchActiveItems(); }}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Active Students (In Library)</DialogTitle>
+            <DialogDescription>Currently inside the library</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search active sessions" value={overlaySearch} onChange={(e) => setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto divide-y text-sm">
+            {activeSessionItems
+              .filter(s => s.userType === 'student')
+              .filter(s => {
+                const q = overlaySearch.toLowerCase();
+                return !q || (s.fullname||'').toLowerCase().includes(q) || (s.userId||'').toLowerCase().includes(q);
+              })
+              .map((s) => {
+                const d = new Date((s.loginTime||0)*1000);
+                const date = d.toLocaleDateString('en-US');
+                const time = d.toLocaleTimeString('en-US').replace('AM','A.M.').replace('PM','P.M.');
+                return (
+                  <div key={s.userId+String(s.loginTime)} className="flex items-center justify-between gap-3 py-2 px-1">
+                    <div className="w-32 text-xs">{date}</div>
+                    <div className="w-28 text-xs">{time}</div>
+                    <div className="flex-1 font-medium">{s.fullname}</div>
+                    <div className="w-40 font-mono text-xs">{s.userId}</div>
+                  </div>
+                );
+              })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showQROverlay} onOpenChange={setShowQROverlay}>
+        <DialogContent className="sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>QR Active Students</DialogTitle>
+            <DialogDescription>Students with active QR codes</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search by name or ID" value={overlaySearch} onChange={(e) => setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 max-h-[60vh] overflow-auto pr-1">
+            {students
+              .filter(s => s.qrCodeActive)
+              .filter(s => {
+                const q = overlaySearch.toLowerCase();
+                return !q || s.fullName.toLowerCase().includes(q) || s.id.toLowerCase().includes(q);
+              })
+              .map(s => {
+                const d = s.qrCodeGeneratedAt ? new Date(s.qrCodeGeneratedAt) : null;
+                const date = d ? d.toLocaleDateString('en-US') : '—';
+                const time = d ? d.toLocaleTimeString('en-US').replace('AM','A.M.').replace('PM','P.M.') : '—';
+                return (
+                  <div key={s.id} className="border rounded-md p-3 text-sm">
+                    <div className="font-medium mb-1">{s.lastName}, {s.firstName} {s.middleName ? s.middleName.charAt(0)+'.' : ''}</div>
+                    <div className="font-mono text-xs mb-2">{s.id}</div>
+                    <div className="text-xs text-muted-foreground">Generated</div>
+                    <div className="text-xs">{date} • {time}</div>
+                  </div>
+                );
+              })
+            }
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

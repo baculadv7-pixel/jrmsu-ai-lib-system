@@ -2,7 +2,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useRegistration } from "@/context/RegistrationContext";
 import { useMemo, useState } from "react";
 import { Eye, EyeOff, CheckCircle2, Loader2, QrCode } from "lucide-react";
@@ -15,6 +15,7 @@ import { NotificationManager } from "@/services/notificationManager";
 
 const RegistrationSecurity = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data, update, reset } = useRegistration();
   const [showPwd, setShowPwd] = useState(false);
   const [showCpwd, setShowCpwd] = useState(false);
@@ -460,9 +461,20 @@ const RegistrationSecurity = () => {
 
           {/* Navigation */}
           <div className="flex justify-between pt-6">
-            <Button variant="outline" onClick={() => navigate("/register/institution")}>
-              Back
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => {
+                const params = new URLSearchParams({ ...(data.role ? { type: data.role } : {}), ...(new URLSearchParams(location.search).get('from') ? { from: new URLSearchParams(location.search).get('from') as string } : {}) }).toString();
+                navigate(`/register/institution?${params}`);
+              }}>
+                Back
+              </Button>
+              {(new URLSearchParams(location.search).get('from')) && (
+                <Button variant="ghost" onClick={() => {
+                  const from = new URLSearchParams(location.search).get('from');
+                  navigate(from === 'student-management' ? '/students' : '/admins');
+                }}>Cancel & Return</Button>
+              )}
+            </div>
             <Button 
               onClick={handleFinish}
               disabled={!allValid || isSubmitting}

@@ -24,6 +24,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { connectOverlaysRealtime, OverlayEvent } from "@/services/overlaysRealtime";
 
 const AdminManagement = () => {
   const navigate = useNavigate();
@@ -47,6 +49,14 @@ const AdminManagement = () => {
   // Library session tracking
   const [activeLibraryAdmins, setActiveLibraryAdmins] = useState<number>(0);
 
+  // Overlay modals state
+  const [showTotalOverlay, setShowTotalOverlay] = useState(false);
+  const [showFilteredOverlay, setShowFilteredOverlay] = useState(false);
+  const [showActiveOverlay, setShowActiveOverlay] = useState(false);
+  const [showQROverlay, setShowQROverlay] = useState(false);
+  const [overlaySearch, setOverlaySearch] = useState("");
+  const [activeSessionItems, setActiveSessionItems] = useState<any[]>([]);
+
   // Load active library sessions
   const loadActiveLibrarySessions = async () => {
     try {
@@ -58,6 +68,14 @@ const AdminManagement = () => {
     } catch (error) {
       console.error('Failed to load active library sessions:', error);
     }
+  };
+
+  const fetchActiveItems = async () => {
+    try {
+      const res = await fetch('http://localhost:5000/api/library/active-sessions?userType=admin');
+      const j = await res.json();
+      setActiveSessionItems(j.items || []);
+    } catch { setActiveSessionItems([]); }
   };
 
   // Load admins from database and backend
@@ -153,7 +171,7 @@ const AdminManagement = () => {
 
   const handleAddAdmin = () => {
     // Pass context that this registration was initiated from Admin Management
-    navigate("/register/personal?type=admin&from=admin-management");
+    navigate("/register?role=admin&from=admin-management");
   };
 
   const handleEditAdmin = (admin: User) => {
@@ -210,6 +228,22 @@ const AdminManagement = () => {
     setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
   };
 
+  // Realtime: refresh overlays while open
+  useEffect(() => {
+    const anyOpen = showActiveOverlay || showQROverlay || showFilteredOverlay || showTotalOverlay;
+    if (!anyOpen) return;
+    const disconnect = connectOverlaysRealtime(async (ev: OverlayEvent) => {
+      if (ev === 'session_update' && showActiveOverlay) {
+        await fetchActiveItems();
+        await loadActiveLibrarySessions();
+      } else if ((ev === 'admins.updated' || ev === 'user.updated') && (showQROverlay || showFilteredOverlay || showTotalOverlay)) {
+        loadAdmins();
+      }
+    });
+    return () => disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showActiveOverlay, showQROverlay, showFilteredOverlay, showTotalOverlay]);
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar userType={userType} />
@@ -234,7 +268,7 @@ const AdminManagement = () => {
 
             {/* Real-Time Statistics */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowTotalOverlay(true); }}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Total Admins
@@ -247,7 +281,7 @@ const AdminManagement = () => {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={async () => { setOverlaySearch(""); await fetchActiveItems(); setShowActiveOverlay(true); }}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Active Admins (In Library)
@@ -260,20 +294,20 @@ const AdminManagement = () => {
                   </div>
                 </CardContent>
               </Card>
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowQROverlay(true); }}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
-                    Deactivated
+                    QR Active
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
                   <div className="flex items-center gap-2">
-                    <Badge className="bg-red-600 h-5" />
-                    <span className="text-3xl font-bold text-red-600">{admins.filter(a => !a.isActive).length}</span>
+                    <QrCode className="h-5 w-5 text-amber-600" />
+                    <span className="text-3xl font-bold text-amber-600">{admins.filter(a => a.qrCodeActive).length}</span>
                   </div>
                 </CardContent>
               </Card>
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowFilteredOverlay(true); }}>
                 <CardHeader className="pb-3">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Filtered Results
@@ -548,6 +582,143 @@ const AdminManagement = () => {
           onSave={handleSaveAdmin}
         />
       )}
+      {/* Overlays */}
+      <Dialog open={showTotalOverlay} onOpenChange={setShowTotalOverlay}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Total Admins</DialogTitle>
+            <DialogDescription>All administrators in the system</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search by name, ID, email, department, role" value={overlaySearch} onChange={(e) => setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto">
+            <div className="grid grid-cols-5 gap-2 px-1 text-xs font-medium sticky top-0 bg-background py-2 border-b">
+              <div>Date</div>
+              <div>Time</div>
+              <div>User ID</div>
+              <div>Fullname</div>
+              <div>Role</div>
+            </div>
+            <div className="divide-y text-sm">
+              {admins
+                .filter(a => {
+                  const q = overlaySearch.toLowerCase();
+                  return !q || a.fullName.toLowerCase().includes(q) || a.id.toLowerCase().includes(q) || (a.email||'').toLowerCase().includes(q) || (a.department||'').toLowerCase().includes(q) || (a.role||'').toLowerCase().includes(q);
+                })
+                .sort((a,b) => (new Date(b.createdAt).getTime()) - (new Date(a.createdAt).getTime()))
+                .map((a) => {
+                  const d = new Date(a.createdAt);
+                  const date = d.toLocaleDateString('en-US', { month:'2-digit', day:'2-digit', year:'numeric' });
+                  const time = d.toLocaleTimeString('en-US', { hour12: true, hour:'2-digit', minute:'2-digit', second:'2-digit' }).replace('AM','A.M.').replace('PM','P.M.');
+                  return (
+                    <div key={a.id+String(a.createdAt)} className="grid grid-cols-5 gap-2 px-1 py-2">
+                      <div>{date}</div>
+                      <div>{time}</div>
+                      <div className="font-mono text-xs">{a.id}</div>
+                      <div>{a.lastName}, {a.firstName} {a.middleName ? a.middleName.charAt(0)+'.' : ''}</div>
+                      <div>{a.role || '—'}</div>
+                    </div>
+                  );
+                })}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showFilteredOverlay} onOpenChange={setShowFilteredOverlay}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Filtered Admins</DialogTitle>
+            <DialogDescription>Matching current filters</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search within filtered results" value={overlaySearch} onChange={(e) => setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto divide-y text-sm">
+            {filteredAdmins
+              .filter(a => {
+                const q = overlaySearch.toLowerCase();
+                return !q || a.fullName.toLowerCase().includes(q) || a.id.toLowerCase().includes(q) || (a.email||'').toLowerCase().includes(q) || (a.department||'').toLowerCase().includes(q) || (a.role||'').toLowerCase().includes(q);
+              })
+              .map(a => (
+                <div key={a.id} className="flex items-center justify-between gap-3 py-2 px-1">
+                  <div className="w-32 text-xs">{new Date(a.createdAt).toLocaleDateString('en-US')}</div>
+                  <div className="w-28 text-xs">{new Date(a.createdAt).toLocaleTimeString('en-US').replace('AM','A.M.').replace('PM','P.M.')}</div>
+                  <div className="flex-1 font-medium">{a.lastName}, {a.firstName} {a.middleName ? a.middleName.charAt(0)+'.' : ''}</div>
+                  <div className="w-40 font-mono text-xs">{a.id}</div>
+                  <div className="w-32 text-right">{a.role || '—'}</div>
+                </div>
+              ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showActiveOverlay} onOpenChange={(open) => { setShowActiveOverlay(open); if (!open) return; fetchActiveItems(); }}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Active Admins (In Library)</DialogTitle>
+            <DialogDescription>Currently inside the library</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search active sessions" value={overlaySearch} onChange={(e) => setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto divide-y text-sm">
+            {activeSessionItems
+              .filter(s => s.userType === 'admin')
+              .filter(s => {
+                const q = overlaySearch.toLowerCase();
+                return !q || (s.fullname||'').toLowerCase().includes(q) || (s.userId||'').toLowerCase().includes(q);
+              })
+              .map((s) => {
+                const d = new Date((s.loginTime||0)*1000);
+                const date = d.toLocaleDateString('en-US');
+                const time = d.toLocaleTimeString('en-US').replace('AM','A.M.').replace('PM','P.M.');
+                return (
+                  <div key={s.userId+String(s.loginTime)} className="flex items-center justify-between gap-3 py-2 px-1">
+                    <div className="w-32 text-xs">{date}</div>
+                    <div className="w-28 text-xs">{time}</div>
+                    <div className="flex-1 font-medium">{s.fullname}</div>
+                    <div className="w-40 font-mono text-xs">{s.userId}</div>
+                  </div>
+                );
+              })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showQROverlay} onOpenChange={setShowQROverlay}>
+        <DialogContent className="sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>QR Active Admins</DialogTitle>
+            <DialogDescription>Admins with active QR codes</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search by name or ID" value={overlaySearch} onChange={(e) => setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 max-h-[60vh] overflow-auto pr-1">
+            {admins
+              .filter(a => a.qrCodeActive)
+              .filter(a => {
+                const q = overlaySearch.toLowerCase();
+                return !q || a.fullName.toLowerCase().includes(q) || a.id.toLowerCase().includes(q);
+              })
+              .map(a => {
+                const d = a.qrCodeGeneratedAt ? new Date(a.qrCodeGeneratedAt) : null;
+                const date = d ? d.toLocaleDateString('en-US') : '—';
+                const time = d ? d.toLocaleTimeString('en-US').replace('AM','A.M.').replace('PM','P.M.') : '—';
+                return (
+                  <div key={a.id} className="border rounded-md p-3 text-sm">
+                    <div className="font-medium mb-1">{a.lastName}, {a.firstName} {a.middleName ? a.middleName.charAt(0)+'.' : ''}</div>
+                    <div className="font-mono text-xs mb-2">{a.id}</div>
+                    <div className="text-xs text-muted-foreground">Generated</div>
+                    <div className="text-xs">{date} • {time}</div>
+                  </div>
+                );
+              })}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

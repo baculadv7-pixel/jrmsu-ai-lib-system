@@ -9,8 +9,9 @@ import Sidebar from "@/components/Layout/Sidebar";
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useMemo, useState } from "react";
 import { BooksService, type BookRecord, type CustomColumn, buildBookQrPayload } from "@/services/books";
+import { connectDashboardRealtime } from "@/services/dashboardRealtime";
 import QRCodeDisplay, { downloadCanvasAsPng } from "@/components/qr/QRCodeDisplay";
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 
@@ -59,6 +60,15 @@ const BookManagement = () => {
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [filterAvailability, setFilterAvailability] = useState<string>('all');
+
+  // Overlays
+  const [showTotal, setShowTotal] = useState(false);
+  const [showAvailable, setShowAvailable] = useState(false);
+  const [showBorrowed, setShowBorrowed] = useState(false);
+  const [showCategories, setShowCategories] = useState(false);
+  const [overlaySearch, setOverlaySearch] = useState("");
+  const [borrowedData, setBorrowedData] = useState<any[]>([]);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
   // Hydrate admin preferences (run after state creation)
   useEffect(() => {
@@ -184,6 +194,41 @@ const BookManagement = () => {
     }
   };
 
+  // Realtime for overlays
+  useEffect(() => {
+    const anyOpen = showTotal || showAvailable || showBorrowed || showCategories;
+    if (!anyOpen) return;
+    const disconnect = connectDashboardRealtime(async (ev) => {
+      if (ev === 'book.added' || ev === 'book.removed') {
+        loadData();
+      } else if ((ev === 'book.borrowed' || ev === 'book.returned') && showBorrowed) {
+        await fetchBorrowed();
+      }
+    });
+    return () => disconnect();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showTotal, showAvailable, showBorrowed, showCategories]);
+
+  const fetchBorrowed = async () => {
+    try {
+      const res = await fetch('http://localhost:5000/api/borrows/active', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setBorrowedData(Array.isArray(data.items) ? data.items : []);
+      } else {
+        setBorrowedData([]);
+      }
+    } catch {
+      setBorrowedData([]);
+    }
+  };
+
+  const fmtDateTime = (d: Date) => {
+    const date = d.toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const time = d.toLocaleTimeString('en-US', { hour12: true, hour: '2-digit', minute: '2-digit', second: '2-digit' }).replace('AM','A.M.').replace('PM','P.M.');
+    return `${date} • ${time}`;
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar userType={userType} />
@@ -264,7 +309,7 @@ const BookManagement = () => {
 
             {/* Quick Stats */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowTotal(true); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Total Books
@@ -275,7 +320,7 @@ const BookManagement = () => {
                 </CardContent>
               </Card>
 
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowAvailable(true); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Available
@@ -286,7 +331,7 @@ const BookManagement = () => {
                 </CardContent>
               </Card>
 
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={async () => { setOverlaySearch(""); await fetchBorrowed(); setShowBorrowed(true); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Borrowed
@@ -297,7 +342,7 @@ const BookManagement = () => {
                 </CardContent>
               </Card>
 
-              <Card className="shadow-jrmsu">
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setActiveCategory(null); setShowCategories(true); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
                     Categories
@@ -533,6 +578,172 @@ const BookManagement = () => {
           </div>
         </main>
       </div>
+
+      {/* Total Books Overlay */}
+      <Dialog open={showTotal} onOpenChange={setShowTotal}>
+        <DialogContent className="sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Total Books</DialogTitle>
+            <DialogDescription>All registered books</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search: Code, Title, Author, Category, ISBN" value={overlaySearch} onChange={(e)=>setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto">
+            <div className="grid grid-cols-6 gap-2 px-1 text-xs font-medium sticky top-0 bg-background py-2 border-b">
+              <div>Book Code</div>
+              <div>Title</div>
+              <div>Author</div>
+              <div>Category</div>
+              <div>ISBN</div>
+              <div>Registered</div>
+            </div>
+            <div className="divide-y text-sm">
+              {books
+                .filter(b => {
+                  const q = overlaySearch.toLowerCase();
+                  return !q || [b.id,b.title,b.author,b.category,b.isbn||''].some(v=>v.toLowerCase().includes(q));
+                })
+                .map(b => (
+                  <div key={b.id} className="grid grid-cols-6 gap-2 px-1 py-2">
+                    <div className="font-mono text-xs">{b.id}</div>
+                    <div>{b.title}</div>
+                    <div>{b.author}</div>
+                    <div>{b.category}</div>
+                    <div className="font-mono text-xs">{b.isbn}</div>
+                    <div>{fmtDateTime(new Date(((b as any).createdAt) ? Number((b as any).createdAt) : Date.now()))}</div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Available Books Overlay */}
+      <Dialog open={showAvailable} onOpenChange={setShowAvailable}>
+        <DialogContent className="sm:max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Available Books</DialogTitle>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search: Code, Title, Author, Category, ISBN" value={overlaySearch} onChange={(e)=>setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto">
+            <div className="grid grid-cols-5 gap-2 px-1 text-xs font-medium sticky top-0 bg-background py-2 border-b">
+              <div>Book Code</div>
+              <div>Title</div>
+              <div>Author</div>
+              <div>Category</div>
+              <div>Copies Available</div>
+            </div>
+            <div className="divide-y text-sm">
+              {books
+                .filter(b => b.available > 0 && b.status === 'available')
+                .filter(b => {
+                  const q = overlaySearch.toLowerCase();
+                  return !q || [b.id,b.title,b.author,b.category,b.isbn||''].some(v=>v.toLowerCase().includes(q));
+                })
+                .sort((a,b) => a.title.localeCompare(b.title) || a.category.localeCompare(b.category))
+                .map(b => (
+                  <div key={b.id} className="grid grid-cols-5 gap-2 px-1 py-2">
+                    <div className="font-mono text-xs">{b.id}</div>
+                    <div>{b.title}</div>
+                    <div>{b.author}</div>
+                    <div>{b.category}</div>
+                    <div className="text-right">{b.available}</div>
+                  </div>
+                ))}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Borrowed Books Overlay */}
+      <Dialog open={showBorrowed} onOpenChange={(open)=>{ setShowBorrowed(open); if (open) fetchBorrowed(); }}>
+        <DialogContent className="sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Borrowed Books</DialogTitle>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Search: Code, Title, Author, Category, Borrower ID/Name" value={overlaySearch} onChange={(e)=>setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto divide-y text-sm">
+            {borrowedData
+              .filter(item => {
+                const q = overlaySearch.toLowerCase();
+                if (!q) return true;
+                const inHeader = [item.id, item.title, item.author, item.category].some((v:string)=>String(v||'').toLowerCase().includes(q));
+                const inBorrowers = (item.borrowers||[]).some((br:any)=>
+                  String(br.userId||'').toLowerCase().includes(q) || String(br.fullName||'').toLowerCase().includes(q)
+                );
+                return inHeader || inBorrowers;
+              })
+              .map(item => (
+                <div key={item.id} className="py-3">
+                  <div className="grid grid-cols-5 gap-2 px-1">
+                    <div className="font-mono text-xs">{item.id}</div>
+                    <div>{item.title}</div>
+                    <div>{item.author}</div>
+                    <div>{item.category}</div>
+                    <div className="text-right">{item.totalBorrowed} Copies Borrowed</div>
+                  </div>
+                  <div className="mt-2 pl-1 text-muted-foreground text-xs">Borrowers:</div>
+                  <div className="mt-1 space-y-1">
+                    {(item.borrowers||[])
+                      .sort((a:any,b:any)=> (b.borrowedAt||0) - (a.borrowedAt||0))
+                      .map((br:any, idx:number) => {
+                        const ts = br.borrowedAt ? new Date((String(br.borrowedAt).length>10? Number(br.borrowedAt): Number(br.borrowedAt)*1000)) : null;
+                        const dt = ts ? fmtDateTime(ts) : '';
+                        return (
+                          <div key={idx} className="flex items-center justify-between gap-2 px-1">
+                            <div className="w-40 font-mono">{br.userId}</div>
+                            <div className="flex-1">
+                              {br.fullName || ''}
+                            </div>
+                            <div className="w-56 text-right">{dt}</div>
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Categories Overlay */}
+      <Dialog open={showCategories} onOpenChange={setShowCategories}>
+        <DialogContent className="sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Book Categories</DialogTitle>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input placeholder="Filter by category name" value={overlaySearch} onChange={(e)=>setOverlaySearch(e.target.value)} />
+          </div>
+          <div className="max-h-[60vh] overflow-auto divide-y">
+            {Array.from(new Set(books.map(b=>b.category)))
+              .filter(c => !overlaySearch.trim() || c.toLowerCase().includes(overlaySearch.toLowerCase()))
+              .sort((a,b)=>a.localeCompare(b))
+              .map((c) => (
+                <div key={c} className="py-2">
+                  <button className="w-full text-left font-medium hover:underline" onClick={()=> setActiveCategory(activeCategory===c? null : c)}>
+                    {c}
+                  </button>
+                  {activeCategory === c && (
+                    <div className="mt-2 border-l pl-3 space-y-1">
+                      {[...books].filter(b=>b.category===c).sort((a,b)=>a.title.localeCompare(b.title)).map(b => (
+                        <div key={b.id} className="flex items-center gap-3">
+                          <span className="font-mono text-xs w-40">{b.id}</span>
+                          <span>{b.title}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit Book Dialog */}
       <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>

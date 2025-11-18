@@ -3,17 +3,44 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useRegistration } from "@/context/RegistrationContext";
 import { useState, useMemo } from "react";
 import { NavigationProgress } from "@/components/ui/navigation-progress";
 import { studentApiService } from "@/services/studentApi";
+import { useEffect } from "react";
+import { listCourses, type CourseItem } from "@/services/coursesApi";
 
 const RegistrationInstitution = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data, update } = useRegistration();
 
   const isStudent = data.role === "student";
+  const [courseOptions, setCourseOptions] = useState<CourseItem[]>([]);
+  const [loadingCourses, setLoadingCourses] = useState(false);
+
+  useEffect(() => {
+    if (!isStudent) return;
+    const dept = (data.department || '').toLowerCase();
+    if (!dept) { setCourseOptions([]); return; }
+    if (dept === 'scje') { setCourseOptions([{ code: 'none', name: 'No course selection required' }]); return; }
+    let cancelled = false;
+    (async () => {
+      setLoadingCourses(true);
+      const items = await listCourses(dept);
+      if (!cancelled) {
+        setCourseOptions(items);
+        // Keep selection if still valid; otherwise clear
+        if (!items.some(i => i.code === data.course)) {
+          update({ course: '' });
+        }
+      }
+      setLoadingCourses(false);
+    })();
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isStudent, data.department]);
   const adminIdOk = data.role !== "admin" || /^KCL-\d{5}$/.test(data.adminId || "");
   const adminPositionOk = data.role !== "admin" || Boolean((data.position || "").trim());
   const adminEmailOk = data.role !== "admin" || (data.email?.includes("@") && data.email?.includes(".com"));
@@ -103,46 +130,15 @@ const RegistrationInstitution = () => {
                 <Select 
                   value={data.course} 
                   onValueChange={(v) => update({ course: v })}
-                  disabled={data.department === "scje"}
+                  disabled={data.department === "scje" || loadingCourses}
                 >
                   <SelectTrigger id="course">
-                    <SelectValue placeholder={data.department === "scje" ? "No course required" : "Select course"} />
+                    <SelectValue placeholder={data.department === "scje" ? "No course required" : (loadingCourses ? "Loading courses..." : "Select course")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {data.department === "cte" && (
-                      <>
-                        <SelectItem value="bsfil">BS Filipino</SelectItem>
-                        <SelectItem value="bssci">BS Science</SelectItem>
-                        <SelectItem value="bsee">BS Elementary Ed</SelectItem>
-                        <SelectItem value="bsmath">BS Math</SelectItem>
-                        <SelectItem value="bspe">BS PE</SelectItem>
-                      </>
-                    )}
-                    {data.department === "cba" && (
-                      <>
-                        <SelectItem value="bhm">BS Hospitality Management</SelectItem>
-                        <SelectItem value="bbahrm">BSBA – HR Management</SelectItem>
-                        <SelectItem value="bsab">BS Agri-Business</SelectItem>
-                      </>
-                    )}
-                    {data.department === "cafse" && (
-                      <>
-                        <SelectItem value="bsa">BS Agriculture</SelectItem>
-                        <SelectItem value="bsf">BS Forestry</SelectItem>
-                        <SelectItem value="bsabe">BS Agri & Biosystems Eng.</SelectItem>
-                      </>
-                    )}
-                    {data.department === "scje" && (
-                      <>
-                        <SelectItem value="none">No course selection required</SelectItem>
-                      </>
-                    )}
-                    {data.department === "ccs" && (
-                      <>
-                        <SelectItem value="bsis">BS Information System</SelectItem>
-                        <SelectItem value="bscs">BS Computer Science</SelectItem>
-                      </>
-                    )}
+                    {(data.department === 'scje' ? [{ code: 'none', name: 'No course selection required' }] : courseOptions).map(opt => (
+                      <SelectItem key={opt.code} value={opt.code}>{opt.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -244,8 +240,19 @@ const RegistrationInstitution = () => {
           )}
 
           <div className="flex justify-between mt-6">
-            <Button variant="outline" onClick={() => navigate("/register/personal")}>Previous</Button>
-            <Button disabled={!canProceed} onClick={() => { if (!canProceed) { setShowErrors(true); return; } navigate("/register/security"); }}>Next</Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => {
+                const params = new URLSearchParams({ ...(data.role ? { type: data.role } : {}), ...(new URLSearchParams(location.search).get('from') ? { from: new URLSearchParams(location.search).get('from') as string } : {}) }).toString();
+                navigate(`/register/personal?${params}`);
+              }}>Previous</Button>
+              {(new URLSearchParams(location.search).get('from')) && (
+                <Button variant="ghost" onClick={() => {
+                  const from = new URLSearchParams(location.search).get('from');
+                  navigate(from === 'student-management' ? '/students' : '/admins');
+                }}>Cancel & Return</Button>
+              )}
+            </div>
+            <Button disabled={!canProceed} onClick={() => { if (!canProceed) { setShowErrors(true); return; } const params = new URLSearchParams({ ...(data.role ? { type: data.role } : {}), ...(new URLSearchParams(location.search).get('from') ? { from: new URLSearchParams(location.search).get('from') as string } : {}) }).toString(); navigate(`/register/security?${params}`); }}>Next</Button>
           </div>
         </CardContent>
       </Card>

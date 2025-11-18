@@ -1,7 +1,6 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { useAuth } from "./AuthContext";
 import { NotificationManager } from "@/services/notificationManager";
-import { API } from "@/config/api";
 
 export interface LibrarySession {
   sessionId: string;

@@ -943,7 +943,8 @@ const RegistrationPersonal = () => {
                   setShowErrors(true);
                   return;
                 }
-                navigate("/register/institution");
+                const params = new URLSearchParams({ ...(userType ? { type: userType } : {}), ...(fromSource ? { from: fromSource } : {}) }).toString();
+                navigate(`/register/institution?${params}`);
               }}
             >
               Next

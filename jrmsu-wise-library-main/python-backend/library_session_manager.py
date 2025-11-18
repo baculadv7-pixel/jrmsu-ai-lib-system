@@ -639,6 +639,13 @@ def register_library_session_endpoints(app):
                 }
             )
             
+            # Broadcast update to all clients for realtime overlays
+            try:
+                from app import socketio
+                socketio.emit('session_update', { 'type': 'login', 'userId': user_id }, broadcast=True)
+            except Exception:
+                pass
+            
             return jsonify(session_data)
         except Exception as e:
             print(f"Error in library_login: {e}")

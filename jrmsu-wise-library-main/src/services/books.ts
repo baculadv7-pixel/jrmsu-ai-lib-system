@@ -100,7 +100,7 @@ export const BooksService = {
     if (books.some((b) => b.id === book.id)) {
       throw new Error("Book code already exists");
     }
-    books.push(book);
+    books.push({ ...book, createdAt: Date.now() });
     writeBooks(books);
   },
   update(id: string, updates: Partial<BookRecord>) {
@@ -180,6 +180,7 @@ export const BooksService = {
           available: 3,
           status: "available",
           shelf: "A1-05",
+          createdAt: Date.now(),
         },
       ]);
     }

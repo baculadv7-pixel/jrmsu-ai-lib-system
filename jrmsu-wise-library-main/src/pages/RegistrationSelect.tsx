@@ -10,11 +10,25 @@ const RegistrationSelect = () => {
   const location = useLocation();
   const { update } = useRegistration();
 
-  // Capture optional returnTo from query and stash for later redirect after registration
+  // Capture optional returnTo/from/role and auto-route phase 1 -> 2
   try {
     const p = new URLSearchParams(location.search);
     const rt = p.get('returnTo');
     if (rt) sessionStorage.setItem('mirror_return_to', rt);
+    const origin = p.get('from') || '';
+    const role = (p.get('role') || p.get('type') || '').toLowerCase();
+    if (role === 'student' || role === 'admin') {
+      if (role === 'student') update({ role: 'student', studentId: 'KC-' });
+      else update({ role: 'admin' });
+      const qs = new URLSearchParams({ type: role, ...(origin ? { from: origin } : {}) }).toString();
+      // Defer a tick to let state settle
+      setTimeout(() => { 
+        window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        // Navigate to Phase 2 with preserved origin
+        // Using location.href to avoid Suspense flash
+        window.location.assign(`/register/personal?${qs}`);
+      }, 0);
+    }
   } catch {}
 
   return (
