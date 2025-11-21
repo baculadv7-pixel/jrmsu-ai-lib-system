@@ -14,6 +14,17 @@ import QRCodeDisplay, { downloadCanvasAsPng } from "@/components/qr/QRCodeDispla
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const BookManagement = () => {
   const { user } = useAuth();
@@ -156,14 +167,21 @@ const BookManagement = () => {
     }
   };
 
-  const onDelete = (id: string) => {
-    if (!confirm("Are you sure you want to delete this book?")) return;
+  const onDelete = async (book: BookRecord) => {
     try {
-      BooksService.remove(id);
+      await BooksService.remove(book.id);
       loadData();
-      toast({ title: "Success", description: "Book deleted successfully" });
-    } catch (error) {
-      toast({ title: "Error", description: String(error), variant: "destructive" });
+      toast({
+        title: "Book deleted",
+        description: `Book ${book.id} - ${book.title} has been removed.`,
+      });
+    } catch (error: any) {
+      console.error('Error deleting book:', error);
+      toast({
+        title: "Delete failed",
+        description: error?.message || "Failed to delete book from server.",
+        variant: "destructive",
+      });
     }
   };
   
@@ -552,15 +570,36 @@ const BookManagement = () => {
                               >
                                 <Download className="h-3 w-3" />
                               </Button>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="text-destructive hover:text-destructive"
-                                title="Delete"
-                                onClick={() => onDelete(book.id)}
-                              >
-                                <Trash2 className="h-3 w-3" />
-                              </Button>
+                              <AlertDialog>
+                                <AlertDialogTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="text-destructive hover:text-destructive"
+                                    title="Delete"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                </AlertDialogTrigger>
+                                <AlertDialogContent>
+                                  <AlertDialogHeader>
+                                    <AlertDialogTitle>Delete Book</AlertDialogTitle>
+                                    <AlertDialogDescription>
+                                      Are you sure you want to delete this book? 
+                                      This action cannot be undone and will permanently remove all associated data.
+                                    </AlertDialogDescription>
+                                  </AlertDialogHeader>
+                                  <AlertDialogFooter>
+                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                    <AlertDialogAction
+                                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                      onClick={() => onDelete(book)}
+                                    >
+                                      Delete Book
+                                    </AlertDialogAction>
+                                  </AlertDialogFooter>
+                                </AlertDialogContent>
+                              </AlertDialog>
                             </div>
                           </td>
                         </tr>

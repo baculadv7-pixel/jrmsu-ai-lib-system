@@ -130,9 +130,10 @@ class AIService {
               'Content-Type': 'application/json',
               ...(token ? { 'Authorization': `Bearer ${token}` } : {})
             },
+            // ai_server expects { user_id, prompt }
             body: JSON.stringify({
-              message: userMessage,
-              history: conversationHistory.map(msg => ({ role: msg.role, content: msg.content }))
+              user_id: userId,
+              prompt: userMessage,
             })
           });
         }
@@ -152,7 +153,11 @@ class AIService {
       }
 
       const data = await response.json();
-      const content: string = (data as any).message?.content ?? (data as any).content ?? '';
+      // ai_server returns { response, emotion }, Ollama chat returns { message: { content } }
+      const content: string = (data as any).response
+        ?? (data as any).message?.content
+        ?? (data as any).content
+        ?? '';
       const assistantMessage: ChatMessage = {
         id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         role: 'assistant',
@@ -210,9 +215,10 @@ class AIService {
               'Content-Type': 'application/json',
               ...(token ? { 'Authorization': `Bearer ${token}` } : {})
             },
+            // ai_server expects { user_id, prompt }
             body: JSON.stringify({
-              message: userMessage,
-              history: conversationHistory.map(msg => ({ role: msg.role, content: msg.content }))
+              user_id: userId,
+              prompt: userMessage,
             })
           });
         }
@@ -255,7 +261,8 @@ class AIService {
         }
       } else {
         const data = await response.json();
-        fullContent = (data as any).content ?? '';
+        // ai_server: { response, emotion }
+        fullContent = (data as any).response ?? (data as any).content ?? '';
         if (fullContent) onChunk(fullContent);
       }
 

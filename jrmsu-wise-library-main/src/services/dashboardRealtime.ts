@@ -36,7 +36,7 @@ export function connectDashboardRealtime(onEvent: (event: DashboardEvent, payloa
     try {
       const io = await getIO();
       if (cancelled) return;
-      socket = io(API.BACKEND.BASE, { transports: ["websocket"], withCredentials: true });
+      socket = io(API.BACKEND.BASE, { transports: ["websocket", "polling"], withCredentials: true });
       const events: DashboardEvent[] = ['book.added','book.removed','book.borrowed','book.returned','book.overdue','reservation.cancelled','book.return_time_activated'];
       events.forEach(ev => socket.on(ev, (p: any) => onEvent(ev, p)));
     } catch (e) {

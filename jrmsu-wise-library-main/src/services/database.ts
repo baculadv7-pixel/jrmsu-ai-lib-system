@@ -120,9 +120,20 @@ class DatabaseService {
   private readonly USERS_KEY = 'jrmsu_users_db';
   private readonly LOGIN_RECORDS_KEY = 'jrmsu_login_records';
   
-  // Initialize with sample users
+  // Initialize with sample users (optional) and always normalize existing data
   constructor() {
-    this.initializeSampleData();
+    // Only seed demo users when explicitly enabled via Vite env
+    const enableSeed =
+      typeof import.meta !== 'undefined' &&
+      (import.meta as any).env &&
+      (import.meta as any).env.VITE_ENABLE_SAMPLE_USERS === 'true';
+
+    if (enableSeed) {
+      this.initializeSampleData();
+    } else {
+      // Even without seeding, ensure any existing users have standardized QR data
+      this.migrateUsersToStandardQR();
+    }
   }
   
   private initializeSampleData() {
@@ -757,27 +768,45 @@ class DatabaseService {
     );
   }
   
-  sortUsers(users: User[], sortBy: 'name' | 'id' | 'email' | 'created', order: 'asc' | 'desc' = 'asc'): User[] {
-    return users.sort((a, b) => {
+  sortUsers(
+    users: User[],
+    sortBy: 'name' | 'id' | 'email' | 'created',
+    order: 'asc' | 'desc' = 'asc',
+  ): User[] {
+    const sorted = [...users];
+    sorted.sort((a, b) => {
       let compareValue = 0;
-      
+
       switch (sortBy) {
-        case 'name':
-          compareValue = a.fullName.localeCompare(b.fullName);
+        case 'name': {
+          const aName = (a.fullName || `${a.lastName || ''} ${a.firstName || ''}`).toString().toLowerCase();
+          const bName = (b.fullName || `${b.lastName || ''} ${b.firstName || ''}`).toString().toLowerCase();
+          compareValue = aName.localeCompare(bName);
           break;
-        case 'id':
-          compareValue = a.id.localeCompare(b.id);
+        }
+        case 'id': {
+          const aId = (a.id || '').toString();
+          const bId = (b.id || '').toString();
+          compareValue = aId.localeCompare(bId);
           break;
-        case 'email':
-          compareValue = a.email.localeCompare(b.email);
+        }
+        case 'email': {
+          const aEmail = (a.email || '').toString().toLowerCase();
+          const bEmail = (b.email || '').toString().toLowerCase();
+          compareValue = aEmail.localeCompare(bEmail);
           break;
-        case 'created':
-          compareValue = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        }
+        case 'created': {
+          const aTime = a.createdAt ? new Date(a.createdAt as any).getTime() : 0;
+          const bTime = b.createdAt ? new Date(b.createdAt as any).getTime() : 0;
+          compareValue = aTime - bTime;
           break;
+        }
       }
-      
+
       return order === 'asc' ? compareValue : -compareValue;
     });
+    return sorted;
   }
 
   // Sync QR code to backend MySQL database

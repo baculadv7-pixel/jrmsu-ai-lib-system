@@ -3,6 +3,7 @@ import { verifyTotpToken } from "@/utils/totp";
 import { databaseService, User } from "@/services/database";
 import { ActivityService } from "@/services/activity";
 import { NotificationsService } from "@/services/notifications";
+import { overdueNotificationService } from "@/services/overdueNotifications";
 import type { QRLoginData } from "@/services/qr";
 
 export type UserRole = "student" | "admin";
@@ -67,9 +68,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     } catch { /* noop */ }
 
-    // Inactivity auto-logout: 30 minutes
+    // Inactivity auto-logout: configurable via Settings (default 30 minutes)
     let timer: any = null;
-    const reset = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => signOut(), 30 * 60 * 1000); };
+    const getTimeoutMinutes = () => {
+      try {
+        const raw = localStorage.getItem('jrmsu_session_timeout_minutes');
+        const v = raw ? Number(raw) : 30;
+        if (!v || Number.isNaN(v)) return 30;
+        return Math.min(240, Math.max(5, v));
+      } catch {
+        return 30;
+      }
+    };
+    const reset = () => {
+      if (timer) clearTimeout(timer);
+      const minutes = getTimeoutMinutes();
+      timer = setTimeout(() => {
+        const currentUser = user; // capture latest user id/name for logging
+        try {
+          if (currentUser?.id) {
+            ActivityService.log(currentUser.id, 'auto_logout_inactive');
+            // Notify all admins that this account was auto-logged-out due to inactivity
+            NotificationsService.add({
+              receiverId: 'ADMIN',
+              type: 'system',
+              message: `Account ${currentUser.id} (${currentUser.fullName || ''}) was automatically logged out after ${minutes} minutes of inactivity.`,
+              metadata: { reason: 'inactive_timeout', minutes },
+            });
+          }
+        } catch {}
+        signOut();
+      }, minutes * 60 * 1000);
+    };
     ['click','mousemove','keydown','scroll','touchstart'].forEach(ev => window.addEventListener(ev, reset, { passive: true } as any));
     reset();
     return () => { if (timer) clearTimeout(timer); ['click','mousemove','keydown','scroll','touchstart'].forEach(ev => window.removeEventListener(ev, reset as any)); };
@@ -119,14 +149,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await fetch('http://localhost:5000/api/users/' + encodeURIComponent(dbUser.id));
       if (r.ok) {
-        const backendUser = await r.json();
-        const merged = { ...session, ...backendUser };
+        const backendUser: any = await r.json();
+        // Merge while preserving local 2FA state when backend does not yet expose it
+        const merged: AuthUser = {
+          ...session,
+          ...backendUser,
+          // Final 2FA flag: if the local session says it's enabled, NEVER let backend
+          // turn it off. Backend can only turn it ON (true), not OFF (false).
+          twoFactorEnabled: Boolean(session.twoFactorEnabled || backendUser.twoFactorEnabled),
+          // Secret: prefer explicit backend key if present, otherwise keep local key.
+          authKey:
+            (backendUser.twoFactorKey as string | undefined) ?? session.authKey,
+        };
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(merged));
         setUser(merged);
       }
     } catch {}
 
     try { ActivityService.log(dbUser.id, 'login'); } catch { /* noop */ }
+
+    // Trigger overdue notifications (email, SMS, browser push + bell) for this user.
+    // Runs in the background so it doesn't block login.
+    try { void overdueNotificationService.checkAndNotifyUserById(dbUser.id); } catch { /* noop */ }
+
     console.log(`✅ User authenticated via manual login: ${dbUser.fullName} (${dbUser.id})`);
   };
 
@@ -194,14 +239,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       const r = await fetch('http://localhost:5000/api/users/' + encodeURIComponent(dbUser.id));
       if (r.ok) {
-        const backendUser = await r.json();
-        const merged = { ...session, ...backendUser };
+        const backendUser: any = await r.json();
+        const merged: AuthUser = {
+          ...session,
+          ...backendUser,
+          twoFactorEnabled: Boolean(session.twoFactorEnabled || backendUser.twoFactorEnabled),
+          authKey:
+            (backendUser.twoFactorKey as string | undefined) ?? session.authKey,
+        };
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(merged));
         setUser(merged);
       }
     } catch {}
 
     try { ActivityService.log(dbUser.id, 'login', 'QR'); } catch { /* noop */ }
+
+    // Trigger overdue notifications for QR logins as well.
+    try { void overdueNotificationService.checkAndNotifyUserById(dbUser.id); } catch { /* noop */ }
+
     console.log(`✅ User authenticated successfully via QR login: ${dbUser.fullName} (${dbUser.id})`);
   };
 

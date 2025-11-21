@@ -11,10 +11,22 @@ import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
 import { databaseService, User } from "@/services/database";
 import { useToast } from "@/hooks/use-toast";
+import { API } from "@/config/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StudentProfileModal } from "@/components/student/StudentProfileModal";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { connectOverlaysRealtime, OverlayEvent } from "@/services/overlaysRealtime";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 
 const StudentManagement = () => {
   const navigate = useNavigate();
@@ -191,6 +203,56 @@ const StudentManagement = () => {
   const handleCloseModal = () => {
     setIsProfileModalOpen(false);
     setSelectedStudent(null);
+  };
+
+  const handleDeleteStudent = async (student: User) => {
+    try {
+      // Attempt backend hard-delete first and require success
+      let ok = false;
+      let errorMessage = '';
+      try {
+        const resp = await fetch(`${API.BACKEND.BASE}/api/students/${encodeURIComponent(student.id)}`, {
+          method: "DELETE",
+        });
+        if (resp.ok) {
+          ok = true;
+        } else {
+          try {
+            const err = await resp.json();
+            errorMessage = err?.error || resp.statusText || 'Failed to delete student on server';
+          } catch {
+            errorMessage = resp.statusText || 'Failed to delete student on server';
+          }
+        }
+      } catch (e: any) {
+        errorMessage = e?.message || 'Network error while deleting student';
+      }
+
+      if (!ok) {
+        throw new Error(errorMessage || 'Failed to delete student on server');
+      }
+
+      // Remove from local database service (fallback/sample users) if present.
+      // This is best-effort only; backend delete is the source of truth.
+      const result = databaseService.deleteUser(student.id);
+      if (!result.success && result.error) {
+        console.warn('Local student delete failed (mock store):', result.error);
+      }
+
+      setStudents(prev => prev.filter(s => s.id !== student.id));
+
+      toast({
+        title: "Student deleted",
+        description: `${student.fullName} has been permanently removed.`,
+      });
+    } catch (error: any) {
+      console.error('Error deleting student:', error);
+      toast({
+        title: "Delete failed",
+        description: error?.message || "Failed to delete student account.",
+        variant: "destructive",
+      });
+    }
   };
 
   // Realtime: refresh overlays while open
@@ -453,22 +515,35 @@ const StudentManagement = () => {
                         <Edit className="h-3 w-3" />
                         Edit
                       </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        className="text-destructive hover:text-destructive"
-                        onClick={() => {
-                          if (window.confirm(`Are you sure you want to delete ${student.firstName} ${student.lastName}?`)) {
-                            setStudents(prev => prev.filter(s => s.id !== student.id));
-                            toast({
-                              title: "Student Deleted",
-                              description: `${student.firstName} ${student.lastName} has been removed`,
-                            });
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="text-destructive hover:text-destructive"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Delete Student</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Are you sure you want to delete {student.fullName}? 
+                              This action cannot be undone and will permanently remove all associated data.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancel</AlertDialogCancel>
+                            <AlertDialogAction
+                              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                              onClick={() => handleDeleteStudent(student)}
+                            >
+                              Delete Student
+                            </AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                     </div>
                   </CardContent>
                 </Card>

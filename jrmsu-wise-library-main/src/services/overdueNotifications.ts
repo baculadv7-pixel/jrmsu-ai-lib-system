@@ -29,6 +29,18 @@ class OverdueNotificationService {
     };
   }
 
+  // Convenience helper: fetch borrowed books for a user and trigger all enabled channels.
+  // This uses the existing backend /api/borrows endpoint plus the per-channel email/SMS/push
+  // endpoints defined in the Python backend.
+  async checkAndNotifyUserById(userId: string): Promise<void> {
+    try {
+      const borrowedBooks = await this.getUserBorrowedBooks(userId);
+      await this.checkAndNotifyUser(userId, borrowedBooks);
+    } catch (error) {
+      console.error('Failed to run overdue notification check for user', userId, error);
+    }
+  }
+
   // Check if book is overdue
   isOverdue(dueDate: string): boolean {
     const due = new Date(dueDate);

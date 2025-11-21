@@ -33,7 +33,7 @@ interface TwoFASetupProps {
 export default function TwoFASetup({ 
   onSetupComplete, 
   onToggle,
-  requirePasswordVerification = true 
+  requirePasswordVerification = false 
 }: TwoFASetupProps = {}) {
   const { user, enableTwoFactor, disableTwoFactor } = useAuth();
   const { toast } = useToast();
@@ -368,19 +368,6 @@ export default function TwoFASetup({
                   Disable 2FA
                 </Button>
               </div>
-            </div>
-          )}
-
-          {/* Password verification for disabling */}
-          {!user?.twoFactorEnabled && requirePasswordVerification && (
-            <div className="space-y-2">
-              <Label>Password (required to disable 2FA)</Label>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-              />
             </div>
           )}
 

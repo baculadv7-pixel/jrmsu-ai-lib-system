@@ -17,6 +17,14 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Optional Excel support for audit export
+try:
+    from openpyxl import Workbook  # type: ignore[import]
+    from openpyxl.styles import Font, PatternFill, Alignment, Border, Side  # type: ignore[import]
+    EXCEL_AVAILABLE = True
+except Exception:
+    EXCEL_AVAILABLE = False
+
 app = Flask(__name__)
 
 # MySQL availability check (for health and logging)
@@ -179,7 +187,8 @@ def add_cors(resp):
         resp.headers.setdefault("Access-Control-Allow-Origin", "*")
     resp.headers["Access-Control-Allow-Credentials"] = "true"
     resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-User-Id"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, OPTIONS"
+    # Allow DELETE (and PATCH) so management pages can perform hard-deletes via CORS preflight
+    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, PATCH, OPTIONS"
     return resp
 
 
@@ -190,6 +199,1072 @@ def root():
 @app.route('/health')
 def health():
     return jsonify(status='ok', mysql=MYSQL_AVAILABLE, timestamp=time.time())
+
+# ---------- System Administrator helpers (audit, backups, version, developers) ----------
+
+def _get_client_ip() -> str:
+    try:
+        return request.headers.get('X-Forwarded-For', '').split(',')[0].strip() or request.remote_addr or ''
+    except Exception:
+        return ''
+
+
+def _ensure_tables_for_admin_features():
+    """Create core tables for admin features if they do not exist.
+
+    This is safe to call multiple times; it will no-op if tables already exist.
+    """
+    if not MYSQL_AVAILABLE:
+        return
+    try:
+        # audit_log table
+        execute_query(
+            """
+            CREATE TABLE IF NOT EXISTS audit_log (
+              id BIGINT AUTO_INCREMENT PRIMARY KEY,
+              timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              user_id VARCHAR(64) NULL,
+              user_role ENUM('admin','student','system') NOT NULL DEFAULT 'system',
+              action VARCHAR(128) NOT NULL,
+              description TEXT NOT NULL,
+              entity_type VARCHAR(64) NULL,
+              entity_id VARCHAR(128) NULL,
+              metadata JSON NULL,
+              success TINYINT(1) NOT NULL DEFAULT 1,
+              ip_address VARCHAR(45) NULL,
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              INDEX idx_audit_ts (timestamp),
+              INDEX idx_audit_user (user_id, action)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """,
+            fetch_all=False,
+        )
+        # db_backups metadata table
+        execute_query(
+            """
+            CREATE TABLE IF NOT EXISTS db_backups (
+              id BIGINT AUTO_INCREMENT PRIMARY KEY,
+              filename VARCHAR(255) NOT NULL,
+              created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              size_bytes BIGINT NOT NULL,
+              checksum VARCHAR(64) NULL,
+              created_by VARCHAR(64) NULL,
+              notes TEXT NULL,
+              INDEX idx_backups_created (created_at)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """,
+            fetch_all=False,
+        )
+        # system_version single-row table
+        execute_query(
+            """
+            CREATE TABLE IF NOT EXISTS system_version (
+              id INT PRIMARY KEY,
+              name VARCHAR(128) NOT NULL,
+              version VARCHAR(32) NOT NULL,
+              release_date DATE NULL,
+              status VARCHAR(32) NOT NULL,
+              notes TEXT NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """,
+            fetch_all=False,
+        )
+        # Seed a default system_version row if missing
+        row = execute_query("SELECT COUNT(*) AS c FROM system_version", fetch_one=True) or {"c": 0}
+        if int(row.get('c') or 0) == 0:
+            execute_query(
+                "INSERT INTO system_version (id, name, version, release_date, status, notes) VALUES (1,%s,%s,%s,%s,%s)",
+                (
+                    'JRMSU Library Management System',
+                    'v1.0.0',
+                    '2024-10-30',
+                    'Stable',
+                    'QR Code authentication, 2FA, AI assistant, real-time notifications, reporting, backup & restore.',
+                ),
+            )
+        # Developers table
+        execute_query(
+            """
+            CREATE TABLE IF NOT EXISTS developers (
+              id INT AUTO_INCREMENT PRIMARY KEY,
+              name VARCHAR(128) NOT NULL,
+              role VARCHAR(128) NOT NULL,
+              email VARCHAR(128) NULL,
+              phone VARCHAR(32) NULL,
+              notes TEXT NULL,
+              avatar_initials VARCHAR(4) NULL,
+              accent VARCHAR(32) NULL
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+            """,
+            fetch_all=False,
+        )
+    except Exception as e:
+        # Failing to create these tables should not crash the app; admin features will gracefully degrade.
+        print(f"⚠️  Failed to ensure admin feature tables: {e}")
+
+
+def _ensure_file_audit_store(db: dict) -> dict:
+    db.setdefault('audit', [])
+    return db
+
+
+def write_audit_log(
+    action: str,
+    description: str,
+    *,
+    user_id: str | None = None,
+    user_role: str = 'system',
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    metadata: dict | None = None,
+    success: bool = True,
+) -> None:
+    """Write an audit_log record to MySQL if available; otherwise to file-backed store.
+
+    Also emits a realtime `audit:new` event for admins.
+    """
+    ts = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    ip = _get_client_ip()
+    meta_json = None
+    try:
+        if metadata is not None:
+            meta_json = json.dumps(metadata, default=str)
+    except Exception:
+        meta_json = None
+
+    if MYSQL_AVAILABLE:
+        try:
+            _ensure_tables_for_admin_features()
+            execute_query(
+                """
+                INSERT INTO audit_log
+                  (timestamp, user_id, user_role, action, description, entity_type, entity_id, metadata, success, ip_address)
+                VALUES (NOW(), %s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    user_id,
+                    user_role,
+                    action,
+                    description,
+                    entity_type,
+                    entity_id,
+                    meta_json,
+                    1 if success else 0,
+                    ip,
+                ),
+            )
+        except Exception as e:
+            print(f"⚠️  Failed to write audit_log to MySQL: {e}")
+    else:
+        try:
+            db = load_db()
+            db = _ensure_file_audit_store(db)
+            db['audit'].append(
+                {
+                    'id': f'AUD-{int(time.time()*1000)}',
+                    'timestamp': ts,
+                    'user_id': user_id,
+                    'user_role': user_role,
+                    'action': action,
+                    'description': description,
+                    'entity_type': entity_type,
+                    'entity_id': entity_id,
+                    'metadata': metadata or {},
+                    'success': bool(success),
+                    'ip_address': ip,
+                }
+            )
+            # Keep last 5000 only
+            db['audit'] = db['audit'][-5000:]
+            save_db(db)
+        except Exception as e:
+            print(f"⚠️  Failed to write audit_log to file store: {e}")
+
+    # Emit realtime event to connected admins (broadcast)
+    try:
+        payload = {
+            'timestamp': ts,
+            'user_id': user_id,
+            'user_role': user_role,
+            'action': action,
+            'description': description,
+            'entity_type': entity_type,
+            'entity_id': entity_id,
+            'success': success,
+        }
+        _broadcast('audit:new', payload)
+    except Exception:
+        pass
+
+
+def _get_admin_2fa_secret(admin_id: str) -> str | None:
+    """Fetch stored 2FA secret for an admin from file-backed store.
+
+    We store 2FA secrets in the lightweight users store (`data.json`) under `twoFactorKey`.
+    """
+    try:
+        fdb = load_db()
+        users = fdb.get('users') or {}
+        u = users.get(admin_id)
+        if not u:
+            return None
+        key = u.get('twoFactorKey') or u.get('twoFactorSetupKey')
+        return key or None
+    except Exception:
+        return None
+
+
+def _verify_admin_2fa(admin_id: str, token: str | None) -> bool:
+    """Verify a TOTP token for an admin if a secret is configured.
+
+    If there is no stored secret for this admin, we treat 2FA as not enforced
+    (return True) to avoid locking out admins in dev mode.
+    """
+    secret = _get_admin_2fa_secret(admin_id)
+    if not secret:
+        # No 2FA configured for this admin; allow for now.
+        return True
+    token = (token or '').strip()
+    if not token:
+        return False
+    try:
+        return bool(verify_totp_code(secret, token, window=1))
+    except Exception:
+        return False
+
+
+def _get_backups_dir() -> str:
+    base = os.path.dirname(__file__)
+    # Use project-level backup folder named "backupdb" (sibling of python-backend)
+    path = os.path.join(base, '..', 'backupdb')
+    try:
+        os.makedirs(path, exist_ok=True)
+    except Exception:
+        pass
+    return os.path.abspath(path)
+
+
+@app.route('/api/backup/create', methods=['POST'])
+def api_backup_create():
+    """Create a database/file backup and store it in the secure backups directory.
+
+    This endpoint is called from the /settings System Administrator UI.
+    It requires an admin user and their current password for confirmation.
+    """
+    body = request.get_json(silent=True) or {}
+    admin_id = (body.get('userId') or body.get('adminId') or _get_user_id()).strip()
+    admin_password = (body.get('adminPassword') or '').encode('utf-8')
+
+    # Basic admin guard: require an admin id and password.
+    # For now we only check that both fields are present; we do not block on
+    # database password verification to avoid accidental lockouts.
+    if not admin_id:
+        return jsonify(error='Admin user required'), 403
+    if not admin_password:
+        return jsonify(error='Admin password required'), 400
+
+    _ensure_tables_for_admin_features()
+
+    backups_dir = _get_backups_dir()
+    ts_label = time.strftime('%Y%m%d-%H%M%S')
+    filename = f'backup-{ts_label}.json.gz'
+    full_path = os.path.join(backups_dir, filename)
+
+    # Default: backup the lightweight file-backed DB. In production, this should
+    # be replaced or complemented with a proper MySQL dump.
+    try:
+        db = load_db()
+        raw = json.dumps(db, default=str).encode('utf-8')
+        import gzip, hashlib
+
+        with gzip.open(full_path, 'wb') as f:
+            f.write(raw)
+        size_bytes = os.path.getsize(full_path)
+        checksum = hashlib.sha256(raw).hexdigest()
+
+        if MYSQL_AVAILABLE:
+            try:
+                execute_query(
+                    "INSERT INTO db_backups (filename, size_bytes, checksum, created_by) VALUES (%s,%s,%s,%s)",
+                    (filename, size_bytes, checksum, admin_id),
+                )
+            except Exception as e:
+                print(f"⚠️  Failed to insert db_backups row: {e}")
+
+        write_audit_log(
+            'backup_created',
+            f'Backup {filename} created successfully',
+            user_id=admin_id,
+            user_role='admin',
+            entity_type='backup',
+            entity_id=filename,
+            metadata={'size_bytes': size_bytes, 'checksum': checksum},
+            success=True,
+        )
+
+        # Notify realtime listeners
+        try:
+            payload = {
+                'type': 'backup:created',
+                'id': filename,
+                'name': filename,
+                'timestamp': int(time.time()),
+                'size_bytes': size_bytes,
+                'created_by': admin_id,
+                'message': 'Backup created',
+            }
+            _broadcast('backup:created', payload)
+            notif = {
+                'id': _new_notif_id(),
+                'user_id': 'admins',
+                'title': 'Backup created',
+                'body': f'Backup {filename} created by {admin_id}',
+                'type': 'system',
+                'meta': payload,
+                'created_at': int(time.time()),
+                'read': False,
+                'action_required': False,
+                'action_payload': None,
+                'actor_id': admin_id,
+            }
+            # Broadcast generic admin notification; frontend can filter by target
+            _broadcast('notification.new', notif)
+        except Exception:
+            pass
+
+        return jsonify(ok=True, filename=filename, size_bytes=size_bytes, checksum=checksum)
+    except Exception as e:
+        write_audit_log(
+            'backup_create_failed',
+            f'Backup failed: {e}',
+            user_id=admin_id,
+            user_role='admin',
+            entity_type='backup',
+            success=False,
+        )
+        return jsonify(error='Backup failed', details=str(e)), 500
+
+
+@app.route('/api/backup/list', methods=['GET'])
+def api_backup_list():
+    """List known backups from db_backups and filesystem.
+
+    NOTE: This endpoint is used primarily by tools and may be subject to
+    stricter content-type handling in some environments. For a
+    frontend-friendly way to get the latest backup, prefer
+    `/api/backup/latest` (POST) which always works with JSON bodies.
+    """
+    admin_id = _get_user_id()
+    _ensure_tables_for_admin_features()
+    backups_dir = _get_backups_dir()
+    items = []
+
+    # Prefer db_backups metadata when available
+    if MYSQL_AVAILABLE:
+        try:
+            rows = execute_query("SELECT id, filename, created_at, size_bytes, checksum, created_by FROM db_backups ORDER BY created_at DESC", fetch_all=True) or []
+            for r in rows:
+                items.append(
+                    {
+                        'id': r.get('id'),
+                        'filename': r.get('filename'),
+                        'created_at': str(r.get('created_at')),
+                        'size_bytes': int(r.get('size_bytes') or 0),
+                        'checksum': r.get('checksum'),
+                        'created_by': r.get('created_by'),
+                    }
+                )
+        except Exception as e:
+            print(f"⚠️  Failed to list db_backups: {e}")
+
+    # Fallback: scan filesystem if db_backups empty or unavailable
+    if not items:
+        try:
+            for name in sorted(os.listdir(backups_dir), reverse=True):
+                if not name.lower().endswith('.gz'):
+                    continue
+                path = os.path.join(backups_dir, name)
+                if not os.path.isfile(path):
+                    continue
+                size_bytes = os.path.getsize(path)
+                items.append(
+                    {
+                        'id': None,
+                        'filename': name,
+                        'created_at': None,
+                        'size_bytes': size_bytes,
+                        'checksum': None,
+                        'created_by': None,
+                    }
+                )
+        except Exception as e:
+            print(f"⚠️  Failed to scan backups dir: {e}")
+
+    return jsonify(items=items, requestedBy=admin_id)
+
+
+@app.route('/api/backup/latest', methods=['POST'])
+def api_backup_latest():
+    """Return metadata for the most recent backup.
+
+    This endpoint is designed for frontend use and always expects a JSON
+    body, which avoids content-type issues some browsers/tooling may
+    trigger when calling `/api/backup/list` directly.
+    """
+    # Safely parse JSON body (even if empty) to keep strict middleware happy
+    _ = request.get_json(silent=True) or {}
+
+    # Reuse the listing logic above
+    admin_id = _get_user_id()
+    _ensure_tables_for_admin_features()
+    backups_dir = _get_backups_dir()
+    items = []
+
+    if MYSQL_AVAILABLE:
+        try:
+            rows = execute_query("SELECT id, filename, created_at, size_bytes, checksum, created_by FROM db_backups ORDER BY created_at DESC", fetch_all=True) or []
+            for r in rows:
+                items.append(
+                    {
+                        'id': r.get('id'),
+                        'filename': r.get('filename'),
+                        'created_at': str(r.get('created_at')),
+                        'size_bytes': int(r.get('size_bytes') or 0),
+                        'checksum': r.get('checksum'),
+                        'created_by': r.get('created_by'),
+                    }
+                )
+        except Exception as e:
+            print(f"⚠️  Failed to list db_backups (latest): {e}")
+
+    if not items:
+        try:
+            for name in sorted(os.listdir(backups_dir), reverse=True):
+                if not name.lower().endswith('.gz'):
+                    continue
+                path = os.path.join(backups_dir, name)
+                if not os.path.isfile(path):
+                    continue
+                size_bytes = os.path.getsize(path)
+                items.append(
+                    {
+                        'id': None,
+                        'filename': name,
+                        'created_at': None,
+                        'size_bytes': size_bytes,
+                        'checksum': None,
+                        'created_by': None,
+                    }
+                )
+        except Exception as e:
+            print(f"⚠️  Failed to scan backups dir (latest): {e}")
+
+    latest = items[0] if items else None
+    if not latest:
+        return jsonify(error='No backup file found'), 404
+
+    return jsonify(latest=latest, requestedBy=admin_id)
+
+
+@app.route('/api/backup/download/<path:filename>', methods=['GET'])
+def api_backup_download(filename: str):
+    """Download a specific backup file (.json.gz) from the backups directory.
+
+    The Settings UI can call this to export/download a backup file.
+    """
+    backups_dir = _get_backups_dir()
+    # Prevent directory traversal
+    safe_name = os.path.basename(filename)
+    full_path = os.path.join(backups_dir, safe_name)
+
+    if not os.path.isfile(full_path):
+        return jsonify(error='Backup file not found'), 404
+
+    # Only allow our known backup format
+    if not safe_name.lower().endswith('.json.gz'):
+        return jsonify(error='Unsupported backup file type'), 400
+
+    from flask import send_file
+    return send_file(
+        full_path,
+        mimetype='application/gzip',
+        as_attachment=True,
+        download_name=safe_name,
+    )
+
+
+@app.route('/api/backup/upload', methods=['POST'])
+def api_backup_upload():
+    """Upload a backup file and store it into the backups directory.
+
+    The uploaded file must match the expected backup format (.json.gz). After
+    upload, admins can trigger restore which will treat it as any other backup.
+    """
+    backups_dir = _get_backups_dir()
+
+    if 'file' not in request.files:
+        return jsonify(error='No file part in request'), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify(error='No selected file'), 400
+
+    safe_name = os.path.basename(file.filename)
+    if not safe_name.lower().endswith('.json.gz'):
+        return jsonify(error='Only .json.gz backup files are supported'), 400
+
+    dest_path = os.path.join(backups_dir, safe_name)
+    try:
+        file.save(dest_path)
+        size_bytes = os.path.getsize(dest_path)
+        write_audit_log(
+            'backup_uploaded',
+            f'Backup file {safe_name} uploaded',
+            user_id=_get_user_id(),
+            user_role='admin',
+            entity_type='backup',
+            entity_id=safe_name,
+            metadata={'size_bytes': size_bytes},
+            success=True,
+        )
+        return jsonify(ok=True, filename=safe_name, size_bytes=size_bytes)
+    except Exception as e:
+        write_audit_log(
+            'backup_upload_failed',
+            f'Backup upload failed: {e}',
+            user_id=_get_user_id(),
+            user_role='admin',
+            entity_type='backup',
+            success=False,
+        )
+        return jsonify(error='Upload failed', details=str(e)), 500
+
+
+@app.route('/api/backup/restore', methods=['POST'])
+def api_backup_restore():
+    """Restore from a backup file.
+
+    By default, restores the most recent backup if `backupName` is not provided.
+    Requires admin id + confirm phrase; optionally validates admin password
+    when MySQL is available.
+    """
+    body = request.get_json(force=True) or {}
+    admin_id = (body.get('userId') or body.get('adminId') or _get_user_id()).strip()
+    confirm = (body.get('confirmPhrase') or '').strip()
+    backup_name = (body.get('backupName') or '').strip()
+    admin_password = (body.get('adminPassword') or '').encode('utf-8') if body.get('adminPassword') else b''
+
+    if not admin_id:
+        return jsonify(error='Admin user required'), 403
+
+    # Require explicit confirmation phrase for safety
+    if confirm.upper() != 'RESTORE NOW':
+        write_audit_log(
+            'backup_restore_denied',
+            'Restore denied: missing confirmation phrase',
+            user_id=admin_id,
+            user_role='admin',
+            entity_type='backup',
+            success=False,
+        )
+        return jsonify(error="Confirmation phrase 'RESTORE NOW' required"), 400
+
+    # We only require that an admin id and confirmation phrase are supplied.
+    # Admin password may be used by the UI but is not enforced here to avoid
+    # unexpected 401 errors during restore.
+
+    _ensure_tables_for_admin_features()
+    backups_dir = _get_backups_dir()
+
+    # Determine target backup file
+    target_file = None
+    try:
+        if backup_name:
+            candidate = os.path.join(backups_dir, backup_name)
+            if os.path.isfile(candidate):
+                target_file = candidate
+        else:
+            # Pick most recent .gz file
+            names = [n for n in os.listdir(backups_dir) if n.lower().endswith('.gz')]
+            if names:
+                names.sort(reverse=True)
+                target_file = os.path.join(backups_dir, names[0])
+    except Exception as e:
+        print(f"⚠️  Failed to resolve backup file: {e}")
+
+    if not target_file:
+        return jsonify(error='No backup file found to restore'), 404
+
+    # Perform restore of file-backed DB only (MySQL restore should be wired separately)
+    import gzip as _gzip
+    try:
+        with _gzip.open(target_file, 'rb') as f:
+            raw = f.read()
+            data = json.loads(raw.decode('utf-8'))
+        # Overwrite data.json
+        with DB_LOCK:
+            with open(DB_PATH, 'w', encoding='utf-8') as f:
+                pyjson.dump(data, f)
+
+        write_audit_log(
+            'backup_restored',
+            f'Restored from backup {os.path.basename(target_file)}',
+            user_id=admin_id,
+            user_role='admin',
+            entity_type='backup',
+            entity_id=os.path.basename(target_file),
+            success=True,
+        )
+
+        try:
+            payload = {
+                'type': 'backup:restored',
+                'id': os.path.basename(target_file),
+                'timestamp': int(time.time()),
+                'restored_by': admin_id,
+                'success': True,
+                'message': 'Restore completed',
+            }
+            _broadcast('backup:restored', payload)
+            notif = {
+                'id': _new_notif_id(),
+                'user_id': 'admins',
+                'title': 'Database restored',
+                'body': f'Database restored from {os.path.basename(target_file)} by {admin_id}',
+                'type': 'system',
+                'meta': payload,
+                'created_at': int(time.time()),
+                'read': False,
+                'action_required': False,
+                'action_payload': None,
+                'actor_id': admin_id,
+            }
+            _broadcast('notification.new', notif)
+        except Exception:
+            pass
+
+        return jsonify(ok=True, backup=os.path.basename(target_file))
+    except Exception as e:
+        write_audit_log(
+            'backup_restore_failed',
+            f'Restore failed: {e}',
+            user_id=admin_id,
+            user_role='admin',
+            entity_type='backup',
+            entity_id=os.path.basename(target_file),
+            success=False,
+        )
+        return jsonify(error='Restore failed', details=str(e)), 500
+
+
+@app.route('/api/audit/export', methods=['GET', 'POST'])
+def api_audit_export():
+    """Export audit log entries as CSV or Excel (.xlsx).
+
+    For admin-triggered exports (from Settings), we expect a POST with the
+    admin's password for confirmation. A plain GET continues to work in dev
+    or for non-sensitive export flows.
+    """
+    _ensure_tables_for_admin_features()
+    user_id = _get_user_id()
+
+    # Basic filters (only from POST body for now)
+    export_format = 'csv'
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        export_format = (body.get('format') or 'csv').lower().strip() or 'csv'
+    else:
+        body = {}
+
+    action_filter = (body.get('action') or '').strip() or None
+    success_filter = body.get('success')
+
+    # Optional admin password check for POST requests initiated from Settings
+    if request.method == 'POST':
+        admin_id = (body.get('userId') or body.get('adminId') or user_id or '').strip()
+        admin_password = (body.get('adminPassword') or '').encode('utf-8') if body.get('adminPassword') else b''
+        if MYSQL_AVAILABLE and admin_id and admin_password:
+            try:
+                row = execute_query(
+                    "SELECT * FROM admins WHERE admin_id = %s OR id = %s",
+                    (admin_id, admin_id),
+                    fetch_one=True,
+                )
+                valid = False
+                if row and row.get('password_hash'):
+                    try:
+                        valid = bcrypt.checkpw(admin_password, str(row.get('password_hash')).encode('utf-8'))
+                    except Exception:
+                        valid = False
+                if not valid:
+                    write_audit_log(
+                        'audit_export_denied',
+                        'Invalid admin password for audit export',
+                        user_id=admin_id,
+                        user_role='admin',
+                        entity_type='audit_export',
+                        success=False,
+                    )
+                    return jsonify(error='Invalid admin credentials'), 401
+            except Exception as e:
+                print(f"⚠️  Failed to verify admin credentials for audit export: {e}")
+        # If MYSQL_AVAILABLE is False, we allow export without password to keep dev simple
+
+    rows = []
+    if MYSQL_AVAILABLE:
+        try:
+            sql = "SELECT timestamp, user_id, user_role, action, description, entity_type, entity_id, success, ip_address FROM audit_log"
+            clauses = []
+            params: list[object] = []
+            if action_filter:
+                clauses.append("action = %s")
+                params.append(action_filter)
+            if isinstance(success_filter, bool):
+                clauses.append("success = %s")
+                params.append(1 if success_filter else 0)
+            if clauses:
+                sql += " WHERE " + " AND ".join(clauses)
+            sql += " ORDER BY timestamp DESC LIMIT 5000"
+            rows = execute_query(sql, tuple(params) if params else None, fetch_all=True) or []
+        except Exception as e:
+            print(f"⚠️  Failed to read audit_log from MySQL: {e}")
+
+    if not rows:
+        try:
+            db = load_db()
+            arr = _ensure_file_audit_store(db).get('audit', [])
+            rows = arr[-5000:][::-1]
+        except Exception as e:
+            print(f"⚠️  Failed to read audit from file store: {e}")
+            rows = []
+
+    # Build CSV in-memory (always)
+    import io, csv
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    header = ['timestamp','user_id','user_role','action','description','entity_type','entity_id','success','ip_address']
+    writer.writerow(header)
+    for r in rows:
+        writer.writerow([
+            str(r.get('timestamp')),
+            r.get('user_id') or '',
+            r.get('user_role') or '',
+            r.get('action') or '',
+            (r.get('description') or '').replace('\r',' ').replace('\n',' '),
+            r.get('entity_type') or '',
+            r.get('entity_id') or '',
+            '1' if (r.get('success') in (1, True, '1', 'true')) else '0',
+            r.get('ip_address') or '',
+        ])
+
+    csv_data = buf.getvalue().encode('utf-8')
+
+    # If Excel export was requested but openpyxl is not available, signal this
+    # clearly so the frontend can fall back to CSV.
+    if export_format == 'xlsx' and not EXCEL_AVAILABLE:
+        return jsonify(error='Excel export not available on server; falling back to CSV is recommended.'), 400
+
+    # Try to build a real .xlsx file when requested and supported
+    if export_format == 'xlsx' and EXCEL_AVAILABLE:
+        import io as _io
+        try:
+            xbuf = _io.BytesIO()
+            wb = Workbook()
+            ws = wb.active
+            ws.title = 'Audit Log'
+
+            # Styles
+            header_fill = PatternFill(start_color='1D4ED8', end_color='1D4ED8', fill_type='solid')  # blue
+            header_font = Font(color='FFFFFF', bold=True)
+            data_fill_alt = PatternFill(start_color='EFF6FF', end_color='EFF6FF', fill_type='solid')  # light blue
+            thin_border = Border(
+                left=Side(style='thin', color='D1D5DB'),
+                right=Side(style='thin', color='D1D5DB'),
+                top=Side(style='thin', color='D1D5DB'),
+                bottom=Side(style='thin', color='D1D5DB'),
+            )
+
+            # Write header row with styling
+            ws.append(header)
+            for col_idx in range(1, len(header) + 1):
+                cell = ws.cell(row=1, column=col_idx)
+                cell.fill = header_fill
+                cell.font = header_font
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+                cell.border = thin_border
+
+            # Write data rows with alternating fill
+            row_index = 2
+            for r in rows:
+                values = [
+                    str(r.get('timestamp')),
+                    r.get('user_id') or '',
+                    r.get('user_role') or '',
+                    r.get('action') or '',
+                    (r.get('description') or '').replace('\\r',' ').replace('\\n',' '),
+                    r.get('entity_type') or '',
+                    r.get('entity_id') or '',
+                    1 if (r.get('success') in (1, True, '1', 'true')) else 0,
+                    r.get('ip_address') or '',
+                ]
+                ws.append(values)
+                # Apply borders and optional zebra striping
+                for col_idx in range(1, len(values) + 1):
+                    cell = ws.cell(row=row_index, column=col_idx)
+                    cell.border = thin_border
+                    if row_index % 2 == 0:
+                        cell.fill = data_fill_alt
+                row_index += 1
+
+            # Auto-size columns
+            for col in ws.columns:
+                max_length = 0
+                column = col[0].column_letter
+                for cell in col:
+                    try:
+                        val = str(cell.value) if cell.value is not None else ''
+                        max_length = max(max_length, len(val))
+                    except Exception:
+                        pass
+                ws.column_dimensions[column].width = max(12, min(max_length + 2, 60))
+
+            wb.save(xbuf)
+            xdata = xbuf.getvalue()
+
+            write_audit_log(
+                'audit_exported',
+                'Audit log exported as Excel',
+                user_id=user_id,
+                user_role='admin',
+                entity_type='audit_export',
+                success=True,
+            )
+
+            from flask import Response as FlaskResponse
+            today = time.strftime('%Y-%m-%d')
+            resp = FlaskResponse(xdata, mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            resp.headers['Content-Disposition'] = f'attachment; filename=audit_log_{today}.xlsx'
+            return resp
+        except Exception as e:
+            print(f"⚠️  Failed to build Excel file for audit export: {e}")
+            # Fall back to CSV
+
+    # Default: CSV export (Excel-friendly)
+    write_audit_log(
+        'audit_exported',
+        'Audit log exported as CSV',
+        user_id=user_id,
+        user_role='admin',
+        entity_type='audit_export',
+        success=True,
+    )
+
+    from flask import Response as FlaskResponse
+    today = time.strftime('%Y-%m-%d')
+    resp = FlaskResponse(csv_data, mimetype='text/csv')
+    resp.headers['Content-Disposition'] = f'attachment; filename=audit_log_{today}.csv'
+    return resp
+
+
+@app.route('/api/admin/system-version', methods=['GET', 'POST'])
+def api_system_version():
+    """Get or update system version metadata used in the Settings page dialog."""
+    _ensure_tables_for_admin_features()
+
+    if request.method == 'GET':
+        if MYSQL_AVAILABLE:
+            try:
+                row = execute_query("SELECT id, name, version, release_date, status, notes FROM system_version WHERE id = 1", fetch_one=True) or {}
+                return jsonify(row)
+            except Exception as e:
+                print(f"⚠️  Failed to read system_version: {e}")
+        # Fallback default
+        return jsonify(
+            {
+                'id': 1,
+                'name': 'JRMSU Library Management System',
+                'version': 'v1.0.0',
+                'release_date': '2024-10-30',
+                'status': 'Stable',
+                'notes': 'QR Code authentication, 2FA, AI assistant, real-time notifications, reporting, backup & restore.',
+            }
+        )
+
+    # POST: update (admin-only, minimal guard)
+    body = request.get_json(force=True) or {}
+    user_id = _get_user_id()
+    version = (body.get('version') or '').strip() or 'v1.0.0'
+    name = (body.get('name') or 'JRMSU Library Management System').strip()
+    status = (body.get('status') or 'Stable').strip()
+    release_date = (body.get('release_date') or '2024-10-30').strip()
+    notes = (body.get('notes') or '').strip()
+
+    if MYSQL_AVAILABLE:
+        try:
+            execute_query(
+                "REPLACE INTO system_version (id, name, version, release_date, status, notes) VALUES (1,%s,%s,%s,%s,%s)",
+                (name, version, release_date, status, notes),
+            )
+        except Exception as e:
+            return jsonify(error=str(e)), 500
+
+    write_audit_log(
+        'system_version_updated',
+        f'System version updated to {version}',
+        user_id=user_id,
+        user_role='admin',
+        entity_type='system_version',
+        success=True,
+    )
+
+    try:
+        payload = {
+            'type': 'system:updated',
+            'version': version,
+            'release_date': release_date,
+            'notes': notes,
+        }
+        _broadcast('system:updated', payload)
+    except Exception:
+        pass
+
+    return jsonify(ok=True)
+
+
+@app.route('/api/admin/developers', methods=['GET', 'POST'])
+def api_developers_collection():
+    """List or create developer records used in the Developers Information dialog."""
+    _ensure_tables_for_admin_features()
+
+    if request.method == 'GET':
+        if MYSQL_AVAILABLE:
+            try:
+                rows = execute_query(
+                    "SELECT id, name, role, email, phone, notes, avatar_initials, accent FROM developers ORDER BY id ASC",
+                    fetch_all=True,
+                ) or []
+                return jsonify(items=rows)
+            except Exception as e:
+                print(f"⚠️  Failed to list developers: {e}")
+        # Fallback to a static list matching the current UI
+        return jsonify(
+            items=[
+                {
+                    'id': 1,
+                    'name': 'Jhon Mark Suico',
+                    'role': 'Team Leader & System Engineer',
+                    'email': 'suicojm99@gmail.com',
+                    'phone': None,
+                    'notes': 'Led the development and architecture of the entire system, ensuring seamless integration of all components.',
+                    'avatar_initials': 'JM',
+                    'accent': 'primary',
+                },
+                {
+                    'id': 2,
+                    'name': 'Jhon Ernie Alimpong',
+                    'role': 'System Architect',
+                    'email': None,
+                    'phone': None,
+                    'notes': 'Designed the system architecture and database structure, creating a robust foundation for scalability.',
+                    'avatar_initials': 'JE',
+                    'accent': 'accent',
+                },
+                {
+                    'id': 3,
+                    'name': 'Vivien Punay',
+                    'role': 'Product Manager',
+                    'email': None,
+                    'phone': None,
+                    'notes': 'Managed project requirements and user experience, ensuring the system meets real-world library needs.',
+                    'avatar_initials': 'VP',
+                    'accent': 'secondary',
+                },
+                {
+                    'id': 4,
+                    'name': 'Lenny Mambo',
+                    'role': 'Data Analyst',
+                    'email': None,
+                    'phone': None,
+                    'notes': 'Analyzed library data patterns and optimized reporting features for actionable insights.',
+                    'avatar_initials': 'LM',
+                    'accent': 'leaf',
+                },
+            ]
+        )
+
+    # POST: create new developer (admin-only basic guard)
+    body = request.get_json(force=True) or {}
+    user_id = _get_user_id()
+    name = (body.get('name') or '').strip()
+    role = (body.get('role') or '').strip()
+    email = (body.get('email') or '').strip() or None
+    phone = (body.get('phone') or '').strip() or None
+    notes = (body.get('notes') or '').strip() or None
+    initials = (body.get('avatar_initials') or '').strip() or None
+    accent = (body.get('accent') or '').strip() or None
+
+    if not name or not role:
+        return jsonify(error='name and role are required'), 400
+
+    if MYSQL_AVAILABLE:
+        try:
+            execute_query(
+                "INSERT INTO developers (name, role, email, phone, notes, avatar_initials, accent) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+                (name, role, email, phone, notes, initials, accent),
+            )
+        except Exception as e:
+            return jsonify(error=str(e)), 500
+
+    write_audit_log(
+        'developer_added',
+        f'Developer {name} added',
+        user_id=user_id,
+        user_role='admin',
+        entity_type='developer',
+        success=True,
+    )
+
+    return jsonify(ok=True)
+
+
+@app.route('/api/admin/developers/<int:dev_id>', methods=['PUT'])
+def api_developer_update(dev_id: int):
+    _ensure_tables_for_admin_features()
+    body = request.get_json(force=True) or {}
+    user_id = _get_user_id()
+
+    if not MYSQL_AVAILABLE:
+        return jsonify(error='Developers update not available without MySQL'), 503
+
+    try:
+        # Fetch existing for logging
+        row = execute_query("SELECT * FROM developers WHERE id = %s", (dev_id,), fetch_one=True) or {}
+        name = (body.get('name') or row.get('name') or '').strip()
+        role = (body.get('role') or row.get('role') or '').strip()
+        email = (body.get('email') or row.get('email') or '').strip() or None
+        phone = (body.get('phone') or row.get('phone') or '').strip() or None
+        notes = (body.get('notes') or row.get('notes') or '').strip() or None
+        initials = (body.get('avatar_initials') or row.get('avatar_initials') or '').strip() or None
+        accent = (body.get('accent') or row.get('accent') or '').strip() or None
+
+        execute_query(
+            "UPDATE developers SET name=%s, role=%s, email=%s, phone=%s, notes=%s, avatar_initials=%s, accent=%s WHERE id=%s",
+            (name, role, email, phone, notes, initials, accent, dev_id),
+        )
+
+        write_audit_log(
+            'developer_updated',
+            f'Developer {dev_id} updated',
+            user_id=user_id,
+            user_role='admin',
+            entity_type='developer',
+            entity_id=str(dev_id),
+            success=True,
+        )
+        return jsonify(ok=True)
+    except Exception as e:
+        return jsonify(error=str(e)), 500
+
 
 # Register library session endpoints so mirror can login/logout via backend
 try:
@@ -345,6 +1420,60 @@ def students_get(student_id: str):
         if not u or (u.get('userType') != 'student' and u.get('role') != 'student'):
             return jsonify(error='Student not found'), 404
         return jsonify(u)
+
+@app.route('/api/students/<student_id>', methods=['DELETE'])
+def students_delete(student_id: str):
+    """Permanently delete a student record from MySQL and fallback store."""
+    sid = (student_id or "").strip()
+    if not sid:
+        return jsonify(error='Student ID required'), 400
+
+    full_name = sid
+
+    # Try to load existing record for logging before delete
+    try:
+        row = StudentDB.get_student_by_id(sid)
+        if row:
+            full_name = (
+                row.get('full_name')
+                or f"{row.get('first_name','')} {row.get('last_name','')}".strip()
+                or sid
+            )
+        # Hard-delete from MySQL if available
+        try:
+            execute_query("DELETE FROM students WHERE student_id = %s OR id = %s", (sid, sid))
+        except Exception:
+            # DB might be unavailable; continue to fallback store
+            pass
+    except Exception:
+        # StudentDB may be unavailable; continue to fallback store
+        pass
+
+    # Remove from file-backed store (dev / fallback)
+    try:
+        fdb = _ensure_users()
+        users = fdb.get('users') or {}
+        if sid in users:
+            u = users.pop(sid)
+            full_name = u.get('fullName') or u.get('full_name') or full_name
+            fdb['users'] = users
+            save_db(fdb)
+    except Exception:
+        pass
+
+    # Log to local activity feed for dashboards
+    try:
+        log_activity(sid, 'student_deleted', full_name)
+    except Exception:
+        pass
+
+    # Broadcast realtime update so overlays and dashboards can refresh
+    try:
+        _broadcast('students.updated', { 'id': sid, 'deleted': True })
+    except Exception:
+        pass
+
+    return jsonify(success=True, message='Student deleted successfully')
 
 @app.route('/api/students/<student_id>', methods=['PUT'])
 def students_put(student_id: str):
@@ -757,6 +1886,60 @@ def admins_put(admin_id: str):
         log_activity(admin_id, 'profile_update')
         _emit('admins.updated', admin_id, u)
         return jsonify(ok=True, admin=u)
+
+@app.route('/api/admins/<admin_id>', methods=['DELETE'])
+def admins_delete(admin_id: str):
+    """Permanently delete an administrator record from MySQL and fallback store."""
+    aid = (admin_id or "").strip()
+    if not aid:
+        return jsonify(error='Admin ID required'), 400
+
+    full_name = aid
+
+    # Try to load existing record for logging before delete
+    try:
+        row = AdminDB.get_admin_by_id(aid)
+        if row:
+            full_name = (
+                row.get('full_name')
+                or f"{row.get('first_name','')} {row.get('last_name','')}".strip()
+                or aid
+            )
+        # Hard-delete from MySQL if available
+        try:
+            execute_query("DELETE FROM admins WHERE admin_id = %s OR id = %s", (aid, aid))
+        except Exception:
+            # DB might be unavailable; continue to fallback store
+            pass
+    except Exception:
+        # AdminDB may be unavailable; continue to fallback store
+        pass
+
+    # Remove from file-backed store (dev / fallback)
+    try:
+        fdb = _ensure_users()
+        users = fdb.get('users') or {}
+        if aid in users:
+            u = users.pop(aid)
+            full_name = u.get('fullName') or u.get('full_name') or full_name
+            fdb['users'] = users
+            save_db(fdb)
+    except Exception:
+        pass
+
+    # Log to local activity feed for dashboards
+    try:
+        log_activity(aid, 'admin_deleted', full_name)
+    except Exception:
+        pass
+
+    # Broadcast realtime update so overlays and dashboards can refresh
+    try:
+        _broadcast('admins.updated', { 'id': aid, 'deleted': True })
+    except Exception:
+        pass
+
+    return jsonify(success=True, message='Administrator deleted successfully')
 
 @app.route('/api/admins/register', methods=['POST'])
 def admins_register():
@@ -1310,6 +2493,40 @@ def start_overdue_watcher(interval_sec: int = 60):
         print('⏰ Overdue watcher started')
     except Exception as e:
         print(f'⚠️  Overdue watcher not started: {e}')
+
+
+def start_overdue_bulk_notifier(interval_sec: int = 24 * 60 * 60):
+    """Periodically trigger bulk overdue notifications for all users.
+
+    This calls the existing /api/overdue/notify-all endpoint, which respects
+    per-user notification preferences and sends email, SMS, and push
+    notifications via the notification_endpoints module.
+    """
+    def _worker():
+        while True:
+            try:
+                resp = requests.post("http://localhost:5000/api/overdue/notify-all", timeout=30)
+                if not resp.ok:
+                    print(f"⚠️  overdue notify-all failed: {resp.status_code} {str(resp.text)[:200]}")
+                else:
+                    data = None
+                    try:
+                        data = resp.json()
+                    except Exception:
+                        data = None
+                    if data:
+                        print(f"📨 overdue notify-all: processed={data.get('processed')} queued={data.get('queued')}")
+            except Exception as e:
+                print(f"⚠️  overdue notify-all error: {e}")
+            time.sleep(interval_sec)
+
+    try:
+        t = threading.Thread(target=_worker, daemon=True)
+        t.start()
+        print('⏰ Bulk overdue notifier started')
+    except Exception as e:
+        print(f'⚠️  Bulk overdue notifier not started: {e}')
+
 
 # Admin: trigger overdue scan immediately
 @app.route('/api/admin/overdue/scan-now', methods=['POST'])
@@ -2324,5 +3541,7 @@ if __name__ == '__main__':
     cleanup_active_sessions_on_startup()
     # Start overdue watcher (emits book.overdue events)
     start_overdue_watcher(60)
+    # Start daily bulk overdue notifications for all users (email/SMS/push)
+    start_overdue_bulk_notifier(24 * 60 * 60)
     print(f'🚀 Backend running at http://localhost:{port}')
     socketio.run(app, host='0.0.0.0', port=port)

@@ -12,6 +12,7 @@ import AIAssistant from "@/components/Layout/AIAssistant";
 import AdminProfileModal from "@/components/AdminProfileModal";
 import { databaseService, User } from "@/services/database";
 import { useToast } from "@/hooks/use-toast";
+import { API } from "@/config/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -201,25 +202,51 @@ const AdminManagement = () => {
     setSelectedAdmin(null);
   };
 
-  const handleDeleteAdmin = async (adminId: string) => {
+  const handleDeleteAdmin = async (admin: User) => {
     try {
-      const result = databaseService.deleteUser(adminId);
-      
-      if (result.success) {
-        toast({
-          title: "Admin deleted",
-          description: "Administrator account has been successfully deleted.",
+      // Attempt backend hard-delete (MySQL) first and require success
+      let ok = false;
+      let errorMessage = '';
+      try {
+        const resp = await fetch(`${API.BACKEND.BASE}/api/admins/${encodeURIComponent(admin.id)}`, {
+          method: "DELETE",
         });
-        loadAdmins(); // Reload the list
-      } else {
-        throw new Error(result.error);
+        if (resp.ok) {
+          ok = true;
+        } else {
+          try {
+            const err = await resp.json();
+            errorMessage = err?.error || resp.statusText || 'Failed to delete admin on server';
+          } catch {
+            errorMessage = resp.statusText || 'Failed to delete admin on server';
+          }
+        }
+      } catch (e: any) {
+        errorMessage = e?.message || 'Network error while deleting admin';
       }
-    } catch (error) {
+
+      if (!ok) {
+        throw new Error(errorMessage || 'Failed to delete admin on server');
+      }
+
+      // Remove from local database service (fallback/sample users) if present.
+      // This is best-effort only; backend delete is the source of truth.
+      const result = databaseService.deleteUser(admin.id);
+      if (!result.success && result.error) {
+        console.warn('Local admin delete failed (mock store):', result.error);
+      }
+
+      loadAdmins(); // Reload the list from local + backend merge
+      toast({
+        title: "Administrator deleted",
+        description: `${admin.fullName} has been permanently removed.`,
+      });
+    } catch (error: any) {
       console.error('Error deleting admin:', error);
       toast({
         title: "Delete failed",
-        description: "Failed to delete administrator account.",
-        variant: "destructive"
+        description: error?.message || "Failed to delete administrator account.",
+        variant: "destructive",
       });
     }
   };
@@ -518,16 +545,16 @@ const AdminManagement = () => {
                             <AlertDialogTitle>Delete Administrator</AlertDialogTitle>
                             <AlertDialogDescription>
                               Are you sure you want to delete <strong>{admin.fullName}</strong>? 
-                              This action cannot be undone and will remove all associated data.
+                              This action cannot be undone and will permanently remove all associated data.
                             </AlertDialogDescription>
                           </AlertDialogHeader>
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
                             <AlertDialogAction 
-                              onClick={() => handleDeleteAdmin(admin.id)}
+                              onClick={() => handleDeleteAdmin(admin)}
                               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                             >
-                              Delete Admin
+                              Delete Administrator
                             </AlertDialogAction>
                           </AlertDialogFooter>
                         </AlertDialogContent>

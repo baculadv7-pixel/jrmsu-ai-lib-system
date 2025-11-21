@@ -110,16 +110,34 @@ export const BooksService = {
     books[idx] = { ...books[idx], ...updates };
     writeBooks(books);
   },
-  remove(id: string) {
-    // Fire-and-forget backend sync to enable realtime events
-    (async () => {
-      try {
-        await fetch(`${API.BACKEND.BASE}/api/books/${encodeURIComponent(id)}`, {
-          method: 'DELETE',
-          credentials: 'include',
-        });
-      } catch {}
-    })();
+  async remove(id: string): Promise<void> {
+    // Ensure backend delete succeeds before mutating local cache
+    let ok = false;
+    let errorMessage = '';
+
+    try {
+      const resp = await fetch(`${API.BACKEND.BASE}/api/books/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (resp.ok) {
+        ok = true;
+      } else {
+        try {
+          const err = await resp.json();
+          errorMessage = err?.error || resp.statusText || 'Failed to delete book on server';
+        } catch {
+          errorMessage = resp.statusText || 'Failed to delete book on server';
+        }
+      }
+    } catch (e: any) {
+      errorMessage = e?.message || 'Network error while deleting book';
+    }
+
+    if (!ok) {
+      throw new Error(errorMessage || 'Failed to delete book on server');
+    }
+
     const books = readBooks().filter((b) => b.id !== id);
     writeBooks(books);
   },
@@ -167,6 +185,14 @@ export const BooksService = {
     writeBooks(updated);
   },
   ensureSeed() {
+    // Only seed demo data when explicitly enabled (to avoid re-creating sample books in production)
+    const enableSeed =
+      typeof import.meta !== 'undefined' &&
+      (import.meta as any).env &&
+      (import.meta as any).env.VITE_ENABLE_SAMPLE_BOOKS === 'true';
+
+    if (!enableSeed) return;
+
     const books = readBooks();
     if (books.length === 0) {
       writeBooks([

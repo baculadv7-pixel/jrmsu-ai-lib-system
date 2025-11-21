@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { 
   Settings, 
   User, 
@@ -77,13 +77,48 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
 
   // Mock settings state - replace with actual context/store
   const [settings, setSettings] = useState({
-    emailNotifications: true,
+    emailNotifications: false,
     smsReminders: false,
-    pushNotifications: true,
+    pushNotifications: false,
     autoLogoutTimer: 30,
     voiceResponse: true,
     assistantMode: "Study Helper" as "Study Helper" | "System Guide" | "Technical Support"
   });
+
+  // When the menu opens, sync notification toggles from the same
+  // localStorage keys used on the full Settings page so they stay in sync.
+  useEffect(() => {
+    if (!open || !user?.id) return;
+    try {
+      const email = localStorage.getItem(`notification_email_${user.id}`) === 'true';
+      const sms = localStorage.getItem(`notification_sms_${user.id}`) === 'true';
+      const push = localStorage.getItem(`notification_push_${user.id}`) === 'true';
+      setSettings(prev => ({
+        ...prev,
+        emailNotifications: email,
+        smsReminders: sms,
+        pushNotifications: push,
+      }));
+    } catch {
+      // ignore storage errors in dropdown
+    }
+  }, [open, user?.id]);
+
+  // Listen for global notification changes so toggles stay in sync even
+  // when the user interacts from the full Settings page.
+  useEffect(() => {
+    const handler = (event: any) => {
+      const detail = event?.detail || {};
+      setSettings(prev => ({
+        ...prev,
+        emailNotifications: 'emailNotifications' in detail ? !!detail.emailNotifications : prev.emailNotifications,
+        smsReminders:       'smsReminders'       in detail ? !!detail.smsReminders       : prev.smsReminders,
+        pushNotifications:  'pushNotifications'  in detail ? !!detail.pushNotifications  : prev.pushNotifications,
+      }));
+    };
+    window.addEventListener('jrmsu:notifications-updated', handler as EventListener);
+    return () => window.removeEventListener('jrmsu:notifications-updated', handler as EventListener);
+  }, []);
 
   const [showCpw, setShowCpw] = useState(false);
   const [showNpw, setShowNpw] = useState(false);
@@ -96,6 +131,46 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
 
   const handleSettingChange = (key: keyof typeof settings, value: any) => {
     setSettings(prev => ({ ...prev, [key]: value }));
+
+    // Keep notification preferences in sync with the main Settings page
+    // by using the same localStorage keys. The main page also persists
+    // these to the backend via pythonApi.
+    if (!user?.id) return;
+    try {
+      if (key === 'emailNotifications') {
+        localStorage.setItem(`notification_email_${user.id}`, String(Boolean(value)));
+      } else if (key === 'smsReminders') {
+        localStorage.setItem(`notification_sms_${user.id}`, String(Boolean(value)));
+      } else if (key === 'pushNotifications') {
+        localStorage.setItem(`notification_push_${user.id}`, String(Boolean(value)));
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    // Best-effort backend sync to match Settings page behaviour
+    if (key === 'emailNotifications' || key === 'smsReminders' || key === 'pushNotifications') {
+      const next = {
+        emailNotifications: key === 'emailNotifications' ? Boolean(value) : settings.emailNotifications,
+        smsReminders:       key === 'smsReminders'       ? Boolean(value) : settings.smsReminders,
+        pushNotifications:  key === 'pushNotifications'  ? Boolean(value) : settings.pushNotifications,
+      };
+      pythonApi.updateNotificationPreferences({
+        userId: user.id,
+        emailNotifications: next.emailNotifications,
+        smsReminders:       next.smsReminders,
+        pushNotifications:  next.pushNotifications,
+      }).catch(() => {
+        // non-fatal in dropdown; full Settings page remains source of truth
+      });
+
+      // Broadcast to keep the /settings page in sync immediately.
+      try {
+        window.dispatchEvent(new CustomEvent('jrmsu:notifications-updated', {
+          detail: next,
+        }));
+      } catch {}
+    }
   };
 
   const getThemeIcon = () => {
@@ -423,10 +498,6 @@ export function SettingsDropdown({ theme, onThemeChange }: SettingsDropdownProps
                   <DropdownMenuItem>
                     <Database className="mr-2 h-4 w-4" />
                     <span>Backup & Restore Database</span>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    <span>Sync or Rebuild QR Codes</span>
                   </DropdownMenuItem>
                   <DropdownMenuItem>
                     <FileText className="mr-2 h-4 w-4" />

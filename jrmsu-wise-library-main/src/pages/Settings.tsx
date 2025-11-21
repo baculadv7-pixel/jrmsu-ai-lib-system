@@ -20,11 +20,6 @@ const Settings = () => {
   const { user, disableTwoFactor } = useAuth();
   const userType: "student" | "admin" = user?.role ?? "student";
   const { toast } = useToast();
-  const [twoFactorEnabled, setTwoFactorEnabled] = useState(Boolean(user?.twoFactorEnabled));
-  // Keep local toggle in sync with persisted user state
-  useEffect(() => {
-    setTwoFactorEnabled(Boolean(user?.twoFactorEnabled));
-  }, [user?.twoFactorEnabled]);
   const [emailAuth, setEmailAuth] = useState(true);
   const [smsAuth, setSmsAuth] = useState(false);
   
@@ -38,6 +33,26 @@ const Settings = () => {
   const [pushNotifications, setPushNotifications] = useState(
     localStorage.getItem(`notification_push_${user?.id}`) === 'true'
   );
+
+  // Keep notification toggles in sync with other UI (e.g. header dropdown)
+  useEffect(() => {
+    const handler = (event: any) => {
+      const detail = event?.detail || {};
+      if ('emailNotifications' in detail) {
+        setEmailNotifications(!!detail.emailNotifications);
+      }
+      if ('smsReminders' in detail) {
+        setSmsReminders(!!detail.smsReminders);
+      }
+      if ('pushNotifications' in detail) {
+        setPushNotifications(!!detail.pushNotifications);
+      }
+    };
+    window.addEventListener('jrmsu:notifications-updated', handler as EventListener);
+    return () => {
+      window.removeEventListener('jrmsu:notifications-updated', handler as EventListener);
+    };
+  }, []);
   
   // Password change state
   const [currentPassword, setCurrentPassword] = useState("");
@@ -55,6 +70,32 @@ const Settings = () => {
   const [showDevelopers, setShowDevelopers] = useState(false);
   const [backupRestoreMode, setBackupRestoreMode] = useState<'backup' | 'restore' | null>(null);
 
+  // Admin backup confirmation state
+  const [showBackupPasswordDialog, setShowBackupPasswordDialog] = useState(false);
+  const [backupPassword, setBackupPassword] = useState("");
+  const [showBackupConfirmDialog, setShowBackupConfirmDialog] = useState(false);
+  const [backupConfirmText, setBackupConfirmText] = useState("");
+  const [isBackupSubmitting, setIsBackupSubmitting] = useState(false);
+
+  // Admin restore confirmation state
+  const [showRestorePasswordDialog, setShowRestorePasswordDialog] = useState(false);
+  const [restorePassword, setRestorePassword] = useState("");
+  const [showRestoreConfirmDialog, setShowRestoreConfirmDialog] = useState(false);
+  const [restoreConfirmText, setRestoreConfirmText] = useState("");
+  const [isRestoreSubmitting, setIsRestoreSubmitting] = useState(false);
+
+  // Post-confirm action dialogs
+  const [showBackupActionDialog, setShowBackupActionDialog] = useState(false);
+  const [showRestoreActionDialog, setShowRestoreActionDialog] = useState(false);
+
+  // Admin audit export confirmation state
+  const [showAuditPasswordDialog, setShowAuditPasswordDialog] = useState(false);
+  const [auditPassword, setAuditPassword] = useState("");
+  const [showAuditConfirmDialog, setShowAuditConfirmDialog] = useState(false);
+  const [auditConfirmText, setAuditConfirmText] = useState("");
+  const [isAuditExporting, setIsAuditExporting] = useState(false);
+  const [showAuditExportFormatDialog, setShowAuditExportFormatDialog] = useState(false);
+
   const handleSave2FA = () => {
     try {
       toast({ title: "Settings Saved", description: "Your 2FA settings have been updated successfully." });
@@ -64,11 +105,76 @@ const Settings = () => {
   };
 
   // Backup & Restore handlers
+  const downloadLatestBackup = async () => {
+    try {
+      // Use a POST JSON endpoint designed to avoid 415/Content-Type issues
+      const res = await fetch('http://localhost:5000/api/backup/latest', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user?.id || '' }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({} as any));
+        if (res.status === 404) {
+          toast({ title: 'No backups yet', description: 'Create a backup first before downloading.' });
+          return;
+        }
+        throw new Error(data.error || 'Failed to load latest backup metadata');
+      }
+
+      const data = await res.json();
+      const latest = data.latest || (data.items || [])[0];
+      const name = latest?.filename;
+      const target = name || '';
+      if (!target) {
+        toast({ title: 'No backups yet', description: 'Create a backup first before downloading.' });
+        return;
+      }
+
+      const dl = await fetch(`http://localhost:5000/api/backup/download/${encodeURIComponent(target)}`);
+      if (!dl.ok) {
+        throw new Error('Download failed');
+      }
+      const blob = await dl.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = target;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+    } catch (e: any) {
+      const raw = String(e?.message || 'Could not download backup file.');
+      const friendly = raw.startsWith('Unexpected token')
+        ? 'Download failed. The server did not return a valid backup file.'
+        : raw;
+      toast({ title: 'Download failed', description: friendly, variant: 'destructive' });
+    }
+  };
+
   const handleBackupDatabase = async () => {
     try {
+      if (!user?.id) {
+        toast({ title: "Not allowed", description: "Only admins can create backups.", variant: "destructive" });
+        return;
+      }
+
+      if (!backupPassword) {
+        toast({ title: "Password required", description: "Please enter your admin password.", variant: "destructive" });
+        return;
+      }
+
+      setIsBackupSubmitting(true);
+
       const response = await fetch('http://localhost:5000/api/backup/create', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          adminPassword: backupPassword,
+        }),
       });
       
       if (response.ok) {
@@ -78,23 +184,53 @@ const Settings = () => {
         });
         setShowBackupRestore(false);
         setBackupRestoreMode(null);
+        setShowBackupPasswordDialog(false);
+        setShowBackupConfirmDialog(false);
+        setShowBackupActionDialog(false);
+        setBackupPassword("");
+        setBackupConfirmText("");
       } else {
-        throw new Error('Backup failed');
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Backup failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Backup Failed",
-        description: "Failed to create database backup. Please try again.",
+        description: error?.message || "Failed to create database backup. Please try again.",
         variant: "destructive"
       });
+    } finally {
+      setIsBackupSubmitting(false);
     }
   };
 
   const handleRestoreDatabase = async () => {
     try {
+      if (!user?.id) {
+        toast({ title: "Not allowed", description: "Only admins can restore backups.", variant: "destructive" });
+        return;
+      }
+
+      if (!restorePassword) {
+        toast({ title: "Password required", description: "Please enter your admin password.", variant: "destructive" });
+        return;
+      }
+
+      if (!restoreConfirmText) {
+        toast({ title: "Confirmation required", description: "Please type the confirmation phrase.", variant: "destructive" });
+        return;
+      }
+
+      setIsRestoreSubmitting(true);
+
       const response = await fetch('http://localhost:5000/api/backup/restore', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: user.id,
+          confirmPhrase: restoreConfirmText,
+          adminPassword: restorePassword,
+        }),
       });
       
       if (response.ok) {
@@ -104,30 +240,66 @@ const Settings = () => {
         });
         setShowBackupRestore(false);
         setBackupRestoreMode(null);
+        setShowRestorePasswordDialog(false);
+        setShowRestoreConfirmDialog(false);
+        setRestorePassword("");
+        setRestoreConfirmText("");
       } else {
-        throw new Error('Restore failed');
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Restore failed');
       }
-    } catch (error) {
+    } catch (error: any) {
+      const message = String(error?.message || 'Failed to restore database. Please try again.');
+      const friendly = message.includes('No backup file found to restore')
+        ? 'No backup database stored in the backupdb folder.'
+        : message;
       toast({
         title: "Restore Failed",
-        description: "Failed to restore database. Please try again.",
+        description: friendly,
         variant: "destructive"
       });
+    } finally {
+      setIsRestoreSubmitting(false);
     }
   };
 
-  const handleExportAuditLog = async () => {
+  const handleExportAuditLog = async (format: 'csv' | 'xlsx') => {
     try {
+      if (!user?.id) {
+        toast({ title: "Not allowed", description: "Only admins can export audit logs.", variant: "destructive" });
+        return;
+      }
+
+      if (!auditPassword) {
+        toast({ title: "Password required", description: "Please enter your admin password.", variant: "destructive" });
+        return;
+      }
+
+      setIsAuditExporting(true);
+
       const response = await fetch('http://localhost:5000/api/audit/export', {
-        method: 'GET'
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: user.id, adminPassword: auditPassword, format }),
       });
       
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({} as any));
+        // If server reports Excel not available, automatically fall back to CSV
+        if (format === 'xlsx' && response.status === 400 && String(data.error || '').includes('Excel export not available')) {
+          await handleExportAuditLog('csv');
+          return;
+        }
+        throw new Error(data.error || 'Export failed');
+      }
+
       if (response.ok) {
         const blob = await response.blob();
         const url = window.URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `audit_log_${new Date().toISOString().split('T')[0]}.xlsx`;
+        const ext = format === 'xlsx' ? 'xlsx' : 'csv';
+        a.download = `audit_log_${new Date().toISOString().split('T')[0]}.${ext}`;
         document.body.appendChild(a);
         a.click();
         window.URL.revokeObjectURL(url);
@@ -135,18 +307,28 @@ const Settings = () => {
         
         toast({
           title: "Audit Log Exported",
-          description: "Audit log has been downloaded as Excel file."
+          description: format === 'xlsx'
+            ? 'Audit log has been downloaded as an Excel (.xlsx) file.'
+            : 'Audit log has been downloaded as a CSV file (Excel-compatible).'
         });
         setShowAuditLog(false);
+        setShowAuditPasswordDialog(false);
+        setShowAuditConfirmDialog(false);
+        setShowAuditExportFormatDialog(false);
+        setAuditPassword("");
+        setAuditConfirmText("");
       } else {
-        throw new Error('Export failed');
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.error || 'Export failed');
       }
-    } catch (error) {
+    } catch (error: any) {
       toast({
         title: "Export Failed",
-        description: "Failed to export audit log. Please try again.",
+        description: error?.message || "Failed to export audit log. Please try again.",
         variant: "destructive"
       });
+    } finally {
+      setIsAuditExporting(false);
     }
   };
 
@@ -251,6 +433,20 @@ const Settings = () => {
         smsReminders,
         pushNotifications
       });
+
+      // Broadcast update so other components (e.g. settings icon dropdown)
+      // can reflect the same toggle state.
+      try {
+        window.dispatchEvent(new CustomEvent('jrmsu:notifications-updated', {
+          detail: {
+            emailNotifications: enabled,
+            smsReminders,
+            pushNotifications,
+          },
+        }));
+      } catch {
+        // ignore cross-environment errors
+      }
       
       toast({
         title: enabled ? "Email Notifications Enabled" : "Email Notifications Disabled",
@@ -275,6 +471,16 @@ const Settings = () => {
         smsReminders: enabled,
         pushNotifications
       });
+
+      try {
+        window.dispatchEvent(new CustomEvent('jrmsu:notifications-updated', {
+          detail: {
+            emailNotifications,
+            smsReminders: enabled,
+            pushNotifications,
+          },
+        }));
+      } catch {}
       
       toast({
         title: enabled ? "SMS Reminders Enabled" : "SMS Reminders Disabled",
@@ -314,6 +520,16 @@ const Settings = () => {
         smsReminders,
         pushNotifications: enabled
       });
+
+      try {
+        window.dispatchEvent(new CustomEvent('jrmsu:notifications-updated', {
+          detail: {
+            emailNotifications,
+            smsReminders,
+            pushNotifications: enabled,
+          },
+        }));
+      } catch {}
       
       toast({
         title: enabled ? "Push Notifications Enabled" : "Push Notifications Disabled",
@@ -346,91 +562,8 @@ const Settings = () => {
               </p>
             </div>
 
-            {/* 2FA Status */}
-            <Card className="shadow-jrmsu border-primary/20">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <Shield className="h-6 w-6 text-primary" />
-                    <div>
-                      <CardTitle>Two-Factor Authentication</CardTitle>
-                      <CardDescription>
-                        Add an extra layer of security to your account
-                      </CardDescription>
-                    </div>
-                  </div>
-                  <Badge className={twoFactorEnabled ? "bg-leaf text-white" : "bg-muted"}>
-                    {twoFactorEnabled ? "ENABLED" : "DISABLED"}
-                  </Badge>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="flex items-center justify-between p-4 bg-muted/50 rounded-lg">
-                  <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Shield className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium">Enable 2FA</p>
-                      <p className="text-sm text-muted-foreground">
-                        Require a second verification method when logging in
-                      </p>
-                    </div>
-                  </div>
-                  <Switch
-                    checked={twoFactorEnabled}
-                    onCheckedChange={(checked) => {
-                      setTwoFactorEnabled(checked);
-                      if (!checked && disableTwoFactor) {
-                        try {
-                          disableTwoFactor();
-                          toast({ title: "2FA disabled" });
-                        } catch (error) {
-                          console.warn('Failed to disable 2FA:', error);
-                        }
-                      }
-                    }}
-                  />
-                </div>
-
-                {twoFactorEnabled && (
-                  <div className="space-y-4 pl-4 border-l-2 border-primary/20">
-                    <TwoFASetup onSetupComplete={() => setTwoFactorEnabled(true)} />
-                    <div className="flex items-center justify-between p-4 bg-background rounded-lg border">
-                      <div className="flex items-center gap-3">
-                        <Mail className="h-5 w-5 text-accent" />
-                        <div>
-                          <p className="font-medium">Email Authentication</p>
-                          <p className="text-sm text-muted-foreground">
-                            Receive codes via email
-                          </p>
-                        </div>
-                      </div>
-                      <Switch
-                        checked={emailAuth}
-                        onCheckedChange={setEmailAuth}
-                      />
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 bg-background rounded-lg border">
-                      <div className="flex items-center gap-3">
-                        <Smartphone className="h-5 w-5 text-secondary" />
-                        <div>
-                          <p className="font-medium">SMS Authentication</p>
-                          <p className="text-sm text-muted-foreground">
-                            Receive codes via text message
-                          </p>
-                        </div>
-                      </div>
-                      <Switch
-                        checked={smsAuth}
-                        onCheckedChange={setSmsAuth}
-                      />
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            {/* 2FA Setup & Status (real, persisted) */}
+            <TwoFASetup />
 
             {/* Change Password */}
             <Card className="shadow-jrmsu">
@@ -648,16 +781,6 @@ const Settings = () => {
                   <CardContent className="space-y-4">
                     <div className="flex items-center justify-between p-4 bg-white/70 rounded-lg border border-orange-200">
                       <div>
-                        <p className="font-medium text-orange-900">2FA Global Control</p>
-                        <p className="text-sm text-orange-700">
-                          Enable or disable 2FA requirements for all users
-                        </p>
-                      </div>
-                      <Switch defaultChecked />
-                    </div>
-                    
-                    <div className="flex items-center justify-between p-4 bg-white/70 rounded-lg border border-orange-200">
-                      <div>
                         <p className="font-medium text-orange-900">Session Timeout Control</p>
                         <p className="text-sm text-orange-700">
                           Set automatic logout time for inactive users
@@ -667,20 +790,26 @@ const Settings = () => {
                         <Input 
                           type="number" 
                           defaultValue={30} 
+                          min={5}
+                          max={240}
                           className="w-16 text-center" 
+                          onBlur={(e) => {
+                            const v = Number(e.target.value) || 30;
+                            const minutes = Math.min(240, Math.max(5, v));
+                            e.target.value = String(minutes);
+                            try {
+                              localStorage.setItem('jrmsu_session_timeout_minutes', String(minutes));
+                              toast({
+                                title: 'Session timeout updated',
+                                description: `Inactive users will be logged out after ${minutes} minutes.`,
+                              });
+                            } catch (err) {
+                              console.warn('Failed to persist session timeout:', err);
+                            }
+                          }}
                         />
                         <span className="text-sm text-orange-700">minutes</span>
                       </div>
-                    </div>
-
-                    <div className="flex items-center justify-between p-4 bg-white/70 rounded-lg border border-orange-200">
-                      <div>
-                        <p className="font-medium text-orange-900">Password Policy</p>
-                        <p className="text-sm text-orange-700">
-                          Enforce strong password requirements
-                        </p>
-                      </div>
-                      <Switch defaultChecked />
                     </div>
                   </CardContent>
                 </Card>
@@ -808,7 +937,7 @@ const Settings = () => {
               </Button>
             </div>
           ) : (
-            <div className="py-4">
+            <div className="space-y-4">
               {backupRestoreMode === 'backup' ? (
                 <div className="space-y-4">
                   <p className="text-sm">
@@ -817,14 +946,20 @@ const Settings = () => {
                   <p className="text-sm text-muted-foreground">
                     The backup will include all users, books, borrowing records, and system data.
                   </p>
+                  <p className="text-xs text-muted-foreground">
+                    You can also download the generated backup file for safe keeping.
+                  </p>
                 </div>
               ) : (
                 <div className="space-y-4">
                   <p className="text-sm">
-                    This will restore your database from the most recent backup in the <code className="bg-muted px-1 py-0.5 rounded">backupdb</code> folder.
+                    This will restore your database from a backup in the <code className="bg-muted px-1 py-0.5 rounded">backupdb</code> folder.
                   </p>
                   <p className="text-sm text-destructive font-medium">
                     ⚠️ Warning: This will overwrite your current database!
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    You may upload a compatible backup file (.json.gz). If no file is uploaded, the most recent backup will be used.
                   </p>
                 </div>
               )}
@@ -843,7 +978,15 @@ const Settings = () => {
             </Button>
             {backupRestoreMode && (
               <Button
-                onClick={backupRestoreMode === 'backup' ? handleBackupDatabase : handleRestoreDatabase}
+                onClick={backupRestoreMode === 'backup'
+                  ? () => {
+                      // First step: ask for admin password in a dedicated overlay (backup)
+                      setShowBackupPasswordDialog(true);
+                    }
+                  : () => {
+                      // First step: ask for admin password in a dedicated overlay (restore)
+                      setShowRestorePasswordDialog(true);
+                    }}
                 className={backupRestoreMode === 'restore' ? 'bg-destructive hover:bg-destructive/90' : ''}
               >
                 {backupRestoreMode === 'backup' ? 'Create Backup' : 'Restore Now'}
@@ -886,9 +1029,15 @@ const Settings = () => {
             <Button variant="outline" onClick={() => setShowAuditLog(false)}>
               Cancel
             </Button>
-            <Button onClick={handleExportAuditLog} className="gap-2">
+            <Button
+              onClick={() => {
+                // First step: ask for admin password in a dedicated overlay
+                setShowAuditPasswordDialog(true);
+              }}
+              className="gap-2"
+            >
               <Download className="h-4 w-4" />
-              Export to Excel
+              Export
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -940,6 +1089,453 @@ const Settings = () => {
           <DialogFooter>
             <Button onClick={() => setShowSystemVersion(false)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Backup Password Dialog */}
+      <Dialog open={showBackupPasswordDialog} onOpenChange={(open) => {
+        setShowBackupPasswordDialog(open);
+        if (!open) {
+          setBackupPassword("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Enter Admin Password</DialogTitle>
+            <DialogDescription>
+              Enter your password to confirm database backup. This is required for all admins who create backups.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="backup-admin-password">Admin Password</Label>
+            <Input
+              id="backup-admin-password"
+              type="password"
+              value={backupPassword}
+              onChange={(e) => setBackupPassword(e.target.value)}
+              placeholder="Enter your admin password"
+            />
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowBackupPasswordDialog(false);
+                setBackupPassword("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!backupPassword) {
+                  toast({
+                    title: "Password required",
+                    description: "Please enter your admin password.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setShowBackupPasswordDialog(false);
+                setShowBackupConfirmDialog(true);
+              }}
+            >
+              Next
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Backup Confirm Phrase Dialog */}
+      <Dialog open={showBackupConfirmDialog} onOpenChange={(open) => {
+        setShowBackupConfirmDialog(open);
+        if (!open) {
+          setBackupConfirmText("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Type "Confirm" to proceed</DialogTitle>
+            <DialogDescription>
+              For safety, please type the word <strong>Confirm</strong> exactly to proceed with creating a backup.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              value={backupConfirmText}
+              onChange={(e) => setBackupConfirmText(e.target.value)}
+              placeholder="Confirm"
+            />
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+        setShowBackupConfirmDialog(false);
+        setBackupConfirmText("");
+      }}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isBackupSubmitting}
+              onClick={() => {
+                if (backupConfirmText !== 'Confirm') {
+                  toast({
+                    title: "Confirmation required",
+                    description: "You must type the word 'Confirm' exactly to proceed.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setShowBackupConfirmDialog(false);
+                setShowBackupActionDialog(true);
+              }}
+            >
+              {isBackupSubmitting ? 'Processing...' : 'Done'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Restore Password Dialog */}
+      <Dialog open={showRestorePasswordDialog} onOpenChange={(open) => {
+        setShowRestorePasswordDialog(open);
+        if (!open) {
+          setRestorePassword("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Enter Admin Password</DialogTitle>
+            <DialogDescription>
+              Enter your password to confirm database restore. This is required for all admins who restore from backups.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="restore-admin-password">Admin Password</Label>
+            <Input
+              id="restore-admin-password"
+              type="password"
+              value={restorePassword}
+              onChange={(e) => setRestorePassword(e.target.value)}
+              placeholder="Enter your admin password"
+            />
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowRestorePasswordDialog(false);
+                setRestorePassword("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!restorePassword) {
+                  toast({
+                    title: "Password required",
+                    description: "Please enter your admin password.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setShowRestorePasswordDialog(false);
+                setShowRestoreConfirmDialog(true);
+              }}
+            >
+              Next
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Restore Confirm Phrase Dialog */}
+      <Dialog open={showRestoreConfirmDialog} onOpenChange={(open) => {
+        setShowRestoreConfirmDialog(open);
+        if (!open) {
+          setRestoreConfirmText("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Type "RESTORE NOW" to proceed</DialogTitle>
+            <DialogDescription>
+              This will restore your database from the most recent backup and overwrite the current data.
+              Type the phrase <strong>RESTORE NOW</strong> exactly to continue.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              value={restoreConfirmText}
+              onChange={(e) => setRestoreConfirmText(e.target.value)}
+              placeholder="RESTORE NOW"
+            />
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+        setShowRestoreConfirmDialog(false);
+        setRestoreConfirmText("");
+      }}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isRestoreSubmitting}
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={() => {
+                if (restoreConfirmText !== 'RESTORE NOW') {
+                  toast({
+                    title: "Confirmation required",
+                    description: "You must type 'RESTORE NOW' exactly to proceed.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setShowRestoreConfirmDialog(false);
+                setShowRestoreActionDialog(true);
+              }}
+            >
+              {isRestoreSubmitting ? 'Restoring...' : 'Done'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Backup Action Selection Dialog */}
+      <Dialog open={showBackupActionDialog} onOpenChange={setShowBackupActionDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select backup action</DialogTitle>
+            <DialogDescription>
+              Choose whether to create a new backup or download the latest existing backup file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Button
+              className="w-full justify-start"
+              onClick={() => {
+                setShowBackupActionDialog(false);
+                handleBackupDatabase();
+              }}
+            >
+              Create Backup
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start"
+              onClick={async () => {
+                await downloadLatestBackup();
+              }}
+            >
+              Download latest backup file
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowBackupActionDialog(false)}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Restore Action Selection Dialog */}
+      <Dialog open={showRestoreActionDialog} onOpenChange={setShowRestoreActionDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select restore action</DialogTitle>
+            <DialogDescription>
+              Restore from the backup folder or upload a compatible backup file (.json.gz) first.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Button
+              className="w-full justify-start bg-destructive hover:bg-destructive/90"
+              onClick={() => {
+                setShowRestoreActionDialog(false);
+                handleRestoreDatabase();
+              }}
+            >
+              Restore Database
+            </Button>
+            <div className="space-y-2 text-xs text-muted-foreground">
+              <label className="text-xs font-medium">Upload backup file (.json.gz)</label>
+              <input
+                type="file"
+                accept=".json.gz"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  const form = new FormData();
+                  form.append('file', file);
+                  try {
+                    const res = await fetch('http://localhost:5000/api/backup/upload', {
+                      method: 'POST',
+                      body: form,
+                    });
+                    const data = await res.json();
+                    if (!res.ok || !data.ok) {
+                      throw new Error(data.error || 'Upload failed');
+                    }
+                    toast({ title: 'Backup uploaded', description: `File ${data.filename} is now available for restore.` });
+                  } catch (err: any) {
+                    toast({ title: 'Upload failed', description: err?.message || 'Could not upload backup file.', variant: 'destructive' });
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowRestoreActionDialog(false)}>
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Audit Export Password Dialog */}
+      <Dialog open={showAuditPasswordDialog} onOpenChange={(open) => {
+        setShowAuditPasswordDialog(open);
+        if (!open) {
+          setAuditPassword("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Enter Admin Password</DialogTitle>
+            <DialogDescription>
+              Enter your password to export the audit log. This is required for all admins who export audit records.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Label htmlFor="audit-admin-password">Admin Password</Label>
+            <Input
+              id="audit-admin-password"
+              type="password"
+              value={auditPassword}
+              onChange={(e) => setAuditPassword(e.target.value)}
+              placeholder="Enter your admin password"
+            />
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowAuditPasswordDialog(false);
+                setAuditPassword("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                if (!auditPassword) {
+                  toast({
+                    title: "Password required",
+                    description: "Please enter your admin password.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setShowAuditPasswordDialog(false);
+                setShowAuditConfirmDialog(true);
+              }}
+            >
+              Next
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Admin Audit Export Confirm Phrase Dialog */}
+      <Dialog open={showAuditConfirmDialog} onOpenChange={(open) => {
+        setShowAuditConfirmDialog(open);
+        if (!open) {
+          setAuditConfirmText("");
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Type "Confirm" to proceed</DialogTitle>
+            <DialogDescription>
+              For safety, please type the word <strong>Confirm</strong> exactly to proceed with exporting the audit log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Input
+              value={auditConfirmText}
+              onChange={(e) => setAuditConfirmText(e.target.value)}
+              placeholder="Confirm"
+            />
+          </div>
+          <DialogFooter className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowAuditConfirmDialog(false);
+                setAuditConfirmText("");
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={isAuditExporting}
+              onClick={() => {
+                if (auditConfirmText !== 'Confirm') {
+                  toast({
+                    title: "Confirmation required",
+                    description: "You must type the word 'Confirm' exactly to proceed.",
+                    variant: "destructive",
+                  });
+                  return;
+                }
+                setShowAuditConfirmDialog(false);
+                setShowAuditExportFormatDialog(true);
+              }}
+            >
+              {isAuditExporting ? 'Processing...' : 'Done'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Audit Export Format Dialog */}
+      <Dialog open={showAuditExportFormatDialog} onOpenChange={setShowAuditExportFormatDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select export format</DialogTitle>
+            <DialogDescription>
+              Choose how you want to download the audit log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <Button
+              className="w-full justify-start gap-2"
+              onClick={() => handleExportAuditLog('xlsx')}
+              disabled={isAuditExporting}
+            >
+              <Download className="h-4 w-4" />
+              Export to Excel (.xlsx)
+            </Button>
+            <Button
+              variant="outline"
+              className="w-full justify-start gap-2"
+              onClick={() => handleExportAuditLog('csv')}
+              disabled={isAuditExporting}
+            >
+              <Download className="h-4 w-4" />
+              Export to CSV (.csv)
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAuditExportFormatDialog(false)}>
+              Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
