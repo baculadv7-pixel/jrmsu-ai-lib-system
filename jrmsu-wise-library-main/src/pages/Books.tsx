@@ -167,9 +167,15 @@ const Books = () => {
     try {
       const studentId = user?.id ?? 'KC-XX-X-00000';
       const studentName = user?.fullName ?? 'Student';
+      // Prevent duplicate reservations for same book+student
+      const existing = ReservationsService.byBook(book.id).find(r => r.studentId === studentId);
+      if (existing) {
+        toast({ title: 'Already reserved', description: `${book.title} is already reserved by you.`, variant: 'default' });
+        return;
+      }
       ReservationsService.add(book.id, book.title, studentId, studentName);
       NotificationsService.add({ receiverId: 'ADMIN', type: 'system', message: `Reservation: ${studentId} reserved ${book.title}` });
-      toast({ title: 'Reserved', description: `${book.title} reserved.` });
+      toast({ title: 'Reserved', description: `${book.title} reserved. Please proceed to the library mirror scanner to borrow.` });
       // Assistant Mode: Study Helper (toggle) — open AI and provide book overview on reserve
       try {
         const uid = user?.id ?? 'guest';
@@ -181,17 +187,6 @@ const Books = () => {
       } catch { /* noop */ }
     } catch (e: any) {
       toast({ title: 'Cannot reserve', description: e?.message ?? '', variant: 'destructive' });
-    }
-  };
-
-  const borrow = (bookId: string) => {
-    try {
-      const rec = BorrowService.borrow(bookId, user?.id ?? "KC-XX-X-00000");
-      setBooks(BooksService.list());
-      NotificationsService.add({ receiverId: user?.id ?? "", type: "borrow", message: `Borrowed ${rec.bookTitle}. Due ${rec.dueDate}` });
-      toast({ title: "Borrowed", description: `Due on ${rec.dueDate}` });
-    } catch (e: any) {
-      toast({ title: "Cannot borrow", description: e?.message ?? "", variant: "destructive" });
     }
   };
 
@@ -348,8 +343,13 @@ const Books = () => {
                         </TableCell>
                         <TableCell className="text-right">
                           {userType === "student" && (
-                            <Button variant="outline" size="sm" disabled={book.status !== "available"} onClick={() => borrow(book.id)}>
-                              Borrow
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              disabled={book.status !== "available" || !!ReservationsService.byBook(book.id).find(r => r.studentId === (user?.id ?? ''))}
+                              onClick={() => reserve(book)}
+                            >
+                              {ReservationsService.byBook(book.id).find(r => r.studentId === (user?.id ?? '')) ? 'Reserved' : 'Reserve'}
                             </Button>
                           )}
                         </TableCell>
@@ -402,10 +402,14 @@ const Books = () => {
                           </div>
                           <div className="flex items-center justify-end gap-2">
                             {userType==='student' && (
-                              <Button variant="outline" size="sm" disabled={b.status!=='available'} onClick={()=>reserve(b)}>Reserve</Button>
-                            )}
-                            {userType==='student' && (
-                              <Button variant="outline" size="sm" disabled={b.status!=='available'} onClick={()=>borrow(b.id)}>Borrow</Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={b.status!=='available' || !!ReservationsService.byBook(b.id).find(r => r.studentId === (user?.id ?? ''))}
+                                onClick={()=>reserve(b)}
+                              >
+                                {ReservationsService.byBook(b.id).find(r => r.studentId === (user?.id ?? '')) ? 'Reserved' : 'Reserve'}
+                              </Button>
                             )}
                           </div>
                         </div>

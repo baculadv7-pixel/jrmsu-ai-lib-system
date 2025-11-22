@@ -6,6 +6,8 @@ import os
 import signal
 import socket
 import sys
+import json
+from pathlib import Path
 
 # Optional dependencies with graceful fallbacks
 try:
@@ -27,6 +29,9 @@ AI_SERVER_PORT = 5002
 OLLAMA_URL = "http://127.0.0.1:11434"
 # Force Ollama host for CLI as well (prevents external overrides)
 os.environ["OLLAMA_HOST"] = OLLAMA_URL
+
+# Base URL of main backend for catalog and metadata queries
+LIBRARY_API_BASE = os.getenv("LIBRARY_API_BASE", "http://localhost:5000")
 
 # CORS: allow frontends (8080/8081) to call AI server (5002)
 @app.before_request
@@ -60,11 +65,32 @@ if _HAVE_MYSQL:
 else:
     print("[AI_SERVER] mysql-connector not installed; DB logging disabled")
 
+# 🔹 Jose system prompt (keeps answers short and JRMSU-library-specific)
+JOSE_SYSTEM_PROMPT = """You are Jose, the AI assistant for the JRMSU Library System.\n\n- Answer in a concise way (33 short paragraphs max).\n- Use bullet points when listing steps.\n- Focus only on what the user asked. Do not add long extra explanations.\n- When questions are about this system (JRMSU AI Library), explain features, pages, and workflows in clear, simple steps.\n- If you are not sure about an implementation detail, say so briefly instead of guessing."""
+
 # 🔹 Function: run local LLaMA 3
-def run_llama(prompt):
+def run_llama(user_prompt: str) -> str:
+    knowledge_block = get_relevant_knowledge(user_prompt)
+    book_block = fetch_book_context(user_prompt)
+
+    context_parts: list[str] = []
+    if knowledge_block:
+        context_parts.append(f"System context:\n{knowledge_block}")
+    if book_block:
+        context_parts.append(f"Book catalog context:\n{book_block}")
+    context_text = "\n\n".join(context_parts)
+    context_section = f"\n\n{context_text}" if context_text else ""
+
+    # Prefix with Jose instructions so replies are shorter and system-focused
+    full_prompt = (
+        f"{JOSE_SYSTEM_PROMPT}"
+        f"{context_section}\n\n"
+        f"User message:\n{user_prompt.strip()}\n\n"
+        f"Jose (short helpful answer, using the context above when relevant):"
+    )
     result = subprocess.run(
         ["ollama", "run", "llama3:8b-instruct-q4_K_M"],
-        input=prompt.encode("utf-8"),
+        input=full_prompt.encode("utf-8"),
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE
     )
@@ -179,6 +205,8 @@ def ai_chat():
     })
 
 if __name__ == "__main__":
+    # Load optional system knowledge file for Jose
+    load_system_knowledge()
     # Force single-instance by asking any running server on 5002 to quit
     _request_previous_shutdown()
     # Always bind to the fixed port; no overrides allowed

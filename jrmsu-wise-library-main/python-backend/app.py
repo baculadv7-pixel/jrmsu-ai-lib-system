@@ -170,6 +170,9 @@ JRMSU Library System
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://localhost:11434")
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "llama3:8b-instruct-q4_K_M")
 
+# Base URL for this backend (used by ai_server and other services)
+BACKEND_BASE_URL = os.getenv("BACKEND_BASE_URL", "http://localhost:5000")
+
 @app.before_request
 def handle_preflight():
     # Handle preflight early so browsers get proper headers even if no route matches OPTIONS explicitly
@@ -2066,6 +2069,96 @@ def toggle_2fa(uid: str):
     log_activity(uid, '2fa_enable' if enabled else '2fa_disable')
     _emit('user.2fa', uid, {"enabled": enabled})
     return jsonify(ok=True, user=cur)
+
+# ---------- Books API (for Jose + frontend sync) ----------
+
+@app.route('/api/books/search', methods=['GET'])
+def api_books_search():
+    """Search books by free-text query (code, title, author, category, ISBN).
+
+    This endpoint is used by the Jose AI server and can also be used by frontends.
+    It queries the MySQL `books` table when available, and falls back to the
+    lightweight file-backed `data.json` store otherwise.
+    """
+    q = (request.args.get('q') or '').strip()
+    if not q:
+        return jsonify(results=[])
+
+    results = []
+
+    # Prefer MySQL-backed books table
+    if MYSQL_AVAILABLE:
+        try:
+            like = f"%{q}%"
+            rows = execute_query(
+                """
+                SELECT 
+                  id, 
+                  book_code, 
+                  title, 
+                  author, 
+                  category, 
+                  isbn, 
+                  shelf_location AS shelf,
+                  total_copies,
+                  available_copies,
+                  status,
+                  qr_code_value AS qr_code
+                FROM books
+                WHERE 
+                  book_code LIKE %s OR
+                  title LIKE %s OR
+                  author LIKE %s OR
+                  category LIKE %s OR
+                  isbn LIKE %s
+                ORDER BY title ASC
+                LIMIT 20
+                """,
+                (like, like, like, like, like),
+                fetch_all=True,
+            ) or []
+            for r in rows:
+                results.append({
+                    'id': r.get('book_code') or r.get('id'),
+                    'code': r.get('book_code') or r.get('id'),
+                    'title': r.get('title'),
+                    'author': r.get('author'),
+                    'category': r.get('category'),
+                    'isbn': r.get('isbn'),
+                    'shelf': r.get('shelf'),
+                    'copies': int(r.get('total_copies') or 0),
+                    'available': int(r.get('available_copies') or 0),
+                    'status': r.get('status') or 'available',
+                    'qr_code': r.get('qr_code'),
+                })
+        except Exception as e:
+            print(f"⚠️  /api/books/search MySQL error: {e}")
+
+    # Fallback to file-backed books from data.json (used for demo / dev)
+    if not results:
+        try:
+            db = load_db()
+            books = db.get('books') or []
+            lq = q.lower()
+            for b in books:
+                if any((str(b.get(k,''))).lower().find(lq) != -1 for k in ['id','code','title','author','category','isbn']):
+                    results.append({
+                        'id': b.get('code') or b.get('id'),
+                        'code': b.get('code') or b.get('id'),
+                        'title': b.get('title'),
+                        'author': b.get('author'),
+                        'category': b.get('category'),
+                        'isbn': b.get('isbn'),
+                        'shelf': b.get('shelf'),
+                        'copies': int(b.get('copies') or 0),
+                        'available': int(b.get('available') or 0),
+                        'status': b.get('status') or 'available',
+                        'qr_code': b.get('qr') or b.get('qr_code'),
+                    })
+        except Exception as e:
+            print(f"⚠️  /api/books/search file-store error: {e}")
+
+    return jsonify(results=results)
 
 # Activity feed
 @app.route('/api/activity', methods=['GET'])

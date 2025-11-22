@@ -169,8 +169,16 @@ class AIService {
 
       // Analyze emotion from both user and assistant message
       const userEmotion = await this.analyzeEmotion(userMessage);
-      const assistantEmotion = await this.analyzeEmotion(data.message.content);
-      assistantMessage.emotion = assistantEmotion.emotion;
+      const aiText: string = (data as any).response
+        ?? (data as any).message?.content
+        ?? (data as any).content
+        ?? '';
+      if (aiText) {
+        const assistantEmotion = await this.analyzeEmotion(aiText);
+        assistantMessage.emotion = assistantEmotion.emotion;
+      } else {
+        assistantMessage.emotion = userEmotion.emotion;
+      }
 
       // Save to history
       this.saveChatMessage(assistantMessage);

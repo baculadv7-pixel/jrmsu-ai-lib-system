@@ -501,7 +501,7 @@ const BookManagement = () => {
                           </th>
                         ))}
                         <th className="text-left p-3 font-medium whitespace-nowrap min-w-[100px]">Copies</th>
-                        <th className="text-center p-3 font-medium whitespace-nowrap min-w-[100px]">QR</th>
+                        <th className="text-center p-3 font-medium whitespace-nowrap min-w-[160px]">QR</th>
                         <th className="text-center p-3 font-medium whitespace-nowrap min-w-[120px]">Status</th>
                         <th className="text-center p-3 font-medium whitespace-nowrap min-w-[200px]">Actions</th>
                       </tr>
@@ -530,8 +530,9 @@ const BookManagement = () => {
                           </td>
                           <td className="p-3">
                             <div className="flex justify-center">
-                              <div className="h-16 w-16">
-                                <QRCodeDisplay data={buildBookQrPayload(book)} size={64} centerLabel="JRMSU–Library" />
+                              {/* Match visual size and clarity of admin/student QR codes */}
+                              <div className="w-[180px] h-[180px] flex items-center justify-center bg-white rounded-md border">
+                                <QRCodeDisplay data={buildBookQrPayload(book)} size={180} centerLabel="JRMSU–Library" />
                               </div>
                             </div>
                           </td>
@@ -854,7 +855,8 @@ const BookManagement = () => {
             <div className="space-y-2 pt-4 border-t">
               <Label>QR Code Preview</Label>
               <div className="flex justify-center p-4 bg-muted/30 rounded-lg">
-                <QRCodeDisplay data={buildBookQrPayload(draft)} size={128} centerLabel="JRMSU–Library" />
+                {/* Use same visual size as user QR to keep consistency and scannability */}
+                <QRCodeDisplay data={buildBookQrPayload(draft)} size={256} centerLabel="JRMSU–Library" />
               </div>
             </div>
           </div>
