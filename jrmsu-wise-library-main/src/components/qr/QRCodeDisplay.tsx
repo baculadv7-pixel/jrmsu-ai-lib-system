@@ -4,23 +4,28 @@ import QRCode from "qrcode";
 type Props = {
   data: string;
   /**
-   * Render size in pixels. Default is 256 to match admin/student QR visual size.
-   * For small inline previews you can override (e.g. 128), but downloaded PNG
-   * will always use a higher internal resolution for sharp printing.
+   * Display size in CSS pixels (how big it looks on screen).
    */
   size?: number;
+  /**
+   * Internal render size in real pixels. Defaults to `size` but can be higher
+   * so that a small on-screen QR still downloads as a sharp, full-resolution
+   * image (e.g., internalSize=256 while size=120).
+   */
+  internalSize?: number;
   centerLabel?: string; // text overlay in the center (NOT USED ANYMORE)
 };
 
-export default function QRCodeDisplay({ data, size = 256 }: Props) {
+export default function QRCodeDisplay({ data, size = 256, internalSize }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const renderSize = internalSize ?? size;
 
   useEffect(() => {
     if (!canvasRef.current) return;
     
     // Draw QR with OPTIMAL settings for maximum readability - NO LOGO
     QRCode.toCanvas(canvasRef.current, data, { 
-      width: size, 
+      width: renderSize, 
       margin: 4, // Increased margin for better scanning
       errorCorrectionLevel: 'M', // Medium error correction for better density
       type: 'image/png',
@@ -32,11 +37,17 @@ export default function QRCodeDisplay({ data, size = 256 }: Props) {
     });
     
     console.log('✅ QR Code generated without logo for maximum readability');
-  }, [data, size]);
+  }, [data, renderSize]);
 
-  // Use a higher internal resolution to keep downloaded PNGs sharp.
-  // The canvas CSS size can be scaled down by the caller via container CSS.
-  return <canvas ref={canvasRef} width={size} height={size} style={{ width: size, height: size }} />;
+  // Use higher internal resolution for sharp downloads; scale down visually via CSS.
+  return (
+    <canvas
+      ref={canvasRef}
+      width={renderSize}
+      height={renderSize}
+      style={{ width: size, height: size }}
+    />
+  );
 }
 
 export function downloadCanvasAsPng(canvas: HTMLCanvasElement, filename = "qr.png") {

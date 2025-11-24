@@ -530,9 +530,14 @@ const BookManagement = () => {
                           </td>
                           <td className="p-3">
                             <div className="flex justify-center">
-                              {/* Match visual size and clarity of admin/student QR codes */}
-                              <div className="w-[180px] h-[180px] flex items-center justify-center bg-white rounded-md border">
-                                <QRCodeDisplay data={buildBookQrPayload(book)} size={180} centerLabel="JRMSU–Library" />
+                              {/* Smaller on-screen QR, but render at full internal resolution for sharp downloads */}
+                              <div className="w-[96px] h-[96px] flex items-center justify-center bg-white rounded-md border">
+                                <QRCodeDisplay
+                                  data={buildBookQrPayload(book)}
+                                  size={96}          // visual size in the table
+                                  internalSize={256} // internal resolution for clear downloads & scanning
+                                  centerLabel="JRMSU–Library"
+                                />
                               </div>
                             </div>
                           </td>

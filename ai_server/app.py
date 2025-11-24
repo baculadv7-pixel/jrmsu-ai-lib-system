@@ -68,6 +68,94 @@ else:
 # 🔹 Jose system prompt (keeps answers short and JRMSU-library-specific)
 JOSE_SYSTEM_PROMPT = """You are Jose, the AI assistant for the JRMSU Library System.\n\n- Answer in a concise way (33 short paragraphs max).\n- Use bullet points when listing steps.\n- Focus only on what the user asked. Do not add long extra explanations.\n- When questions are about this system (JRMSU AI Library), explain features, pages, and workflows in clear, simple steps.\n- If you are not sure about an implementation detail, say so briefly instead of guessing."""
 
+# In-memory store for system knowledge loaded from system_knowledge.json
+SYSTEM_KNOWLEDGE = {}
+SYSTEM_TOPICS = []
+
+def load_system_knowledge(path: str | None = None) -> None:
+    """Load system_knowledge.json once at startup.
+
+    Populates SYSTEM_KNOWLEDGE and SYSTEM_TOPICS used by get_relevant_knowledge().
+    Also strips any stray control characters so the JSON parser does not fail
+    when the file contains copy-paste artifacts.
+    """
+    global SYSTEM_KNOWLEDGE, SYSTEM_TOPICS
+
+    if path is None:
+        path = os.path.join(Path(__file__).parent, "system_knowledge.json")
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            raw = f.read()
+
+        # Remove non-whitespace control characters (< 0x20) to tolerate
+        # accidental characters like U+001A that break json.loads.
+        sanitized = "".join(
+            ch for ch in raw
+            if (ch >= " " or ch in "\r\n\t")
+        )
+
+        data = json.loads(sanitized)
+
+        SYSTEM_KNOWLEDGE = data or {}
+        SYSTEM_TOPICS = SYSTEM_KNOWLEDGE.get("topics", []) or []
+        print(f"[AI_SERVER] Loaded system knowledge from {path}")
+    except FileNotFoundError:
+        SYSTEM_KNOWLEDGE = {}
+        SYSTEM_TOPICS = []
+        print(f"[AI_SERVER] system_knowledge.json not found at {path}; continuing without extra context")
+    except Exception as e:
+        SYSTEM_KNOWLEDGE = {}
+        SYSTEM_TOPICS = []
+        print(f"[AI_SERVER] Failed to load system knowledge: {e}")
+
+def get_relevant_knowledge(user_prompt: str) -> str:
+    """Return a slice of system knowledge relevant to the user's prompt.
+
+    Uses simple keyword matching against SYSTEM_TOPICS from system_knowledge.json.
+    """
+    if not isinstance(user_prompt, str):
+        user_prompt = str(user_prompt or "")
+
+    text = user_prompt.lower()
+    if not SYSTEM_TOPICS:
+        # Fall back to summary only
+        return SYSTEM_KNOWLEDGE.get("summary", "")
+
+    matched_details = []
+    for topic in SYSTEM_TOPICS:
+        keywords = [str(k).lower() for k in topic.get("keywords", [])]
+        if any(k in text for k in keywords):
+            details = topic.get("details")
+            if details:
+                matched_details.append(str(details))
+
+    summary = SYSTEM_KNOWLEDGE.get("summary", "")
+    if matched_details:
+        return (summary + "\n\n" + "\n\n".join(matched_details)).strip()
+
+    return summary
+
+def fetch_book_context(user_prompt: str) -> str:
+    """Optionally fetch extra book/catalog context from the main backend.
+
+    This is best-effort: if the endpoint doesn't exist or times out, we just return "".
+    """
+    try:
+        # Example endpoint – adjust if you later add a dedicated AI context route
+        resp = requests.get(f"{LIBRARY_API_BASE}/api/ai/book-context", timeout=1.5)
+        if not resp.ok:
+            return ""
+        payload = resp.json() or {}
+        return str(
+            payload.get("context")
+            or payload.get("details")
+            or payload.get("summary")
+            or ""
+        )
+    except Exception:
+        return ""
+
 # 🔹 Function: run local LLaMA 3
 def run_llama(user_prompt: str) -> str:
     knowledge_block = get_relevant_knowledge(user_prompt)
