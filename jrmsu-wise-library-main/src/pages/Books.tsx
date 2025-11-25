@@ -533,7 +533,7 @@ const Books = () => {
                           <Badge variant={book.status === "available" ? "default" : "secondary"}>{book.status}</Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {userType === "student" && (
+                          {(userType === "student" || userType === "admin") && (
                             <Button
                               variant="outline"
                               size="sm"
@@ -592,7 +592,7 @@ const Books = () => {
                             <div className="h-32 w-32"><QRCodeDisplay data={JSON.stringify({t:'BOOK', id:b.id, title:b.title, author:b.author, category:b.category, isbn:b.isbn})} size={128} centerLabel="JRMSU–Library"/></div>
                           </div>
                           <div className="flex items-center justify-end gap-2">
-                            {userType==='student' && (
+                            {(userType === 'student' || userType === 'admin') && (
                               <Button
                                 variant="outline"
                                 size="sm"

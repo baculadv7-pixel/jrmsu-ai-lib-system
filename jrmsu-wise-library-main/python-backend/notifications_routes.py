@@ -80,16 +80,72 @@ def mark_all_read():
 
 @notifications_bp.route('/api/activity-log', methods=['GET'])
 def get_activity_log():
-    """Get recent activity log"""
-    limit = int(request.args.get('limit', 100))
-    offset = (int(request.args.get('page', 1)) - 1) * limit
-    
-    activities = NotificationsService.get_activity_log(limit=limit, offset=offset)
-    
-    return jsonify({
-        'items': activities,
-        'total': len(activities)
-    })
+    """Get recent activity log (dashboard, all users)"""
+    try:
+        limit = int(request.args.get('limit', 100))
+        offset = (int(request.args.get('page', 1)) - 1) * limit
+
+        activities = NotificationsService.get_activity_log(limit=limit, offset=offset)
+
+        return jsonify({
+            'items': activities,
+            'total': len(activities)
+        })
+    except Exception as e:
+        print(f"❌ Error fetching activity log: {e}")
+        return jsonify({'items': [], 'total': 0, 'error': str(e)}), 500
+
+@notifications_bp.route('/api/activity', methods=['GET'])
+def get_activity():
+    """Compatibility endpoint for ActivityService.subscribe (same data as /api/activity-log)."""
+    try:
+        limit = int(request.args.get('limit', 100))
+        offset = (int(request.args.get('page', 1)) - 1) * limit
+
+        activities = NotificationsService.get_activity_log(limit=limit, offset=offset)
+
+        return jsonify({
+            'items': activities,
+            'total': len(activities)
+        })
+    except Exception as e:
+        print(f"❌ Error fetching activity (compat): {e}")
+        return jsonify({'items': [], 'total': 0, 'error': str(e)}), 500
+
+@notifications_bp.route('/api/activity', methods=['POST'])
+def create_activity():
+    """Create an activity_log entry from frontend ActivityService.log.
+
+    Expected JSON body: { "userId": string, "action": string, "details"?: string | object }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        user_id = data.get('userId') or data.get('user_id') or 'UNKNOWN'
+        action = data.get('action') or data.get('event_type') or 'activity'
+        details = data.get('details')
+
+        # Derive a human-readable summary from details when possible
+        summary = ''
+        if isinstance(details, str):
+            summary = details
+        elif isinstance(details, dict):
+            summary = details.get('summary') or details.get('message') or ''
+
+        if not summary:
+            summary = f"{user_id} {action.replace('_', ' ')}".strip()
+
+        log_activity(
+            event_type=action,
+            user_id=user_id,
+            summary=summary,
+            details=details if isinstance(details, dict) else ({'details': details} if details else None),
+            source='MAIN'
+        )
+
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"❌ Error creating activity: {e}")
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 # ============================================
 # Notification Creation Routes

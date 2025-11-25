@@ -1,29 +1,77 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { BookOpen, Users, TrendingUp, Clock } from "lucide-react";
+import { BookOpen, Users, TrendingUp, Clock, X, RefreshCcw } from "lucide-react";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useMemo, useState } from "react";
 import { StatsService, type LiveStats } from "@/services/stats";
-import { ActivityService, type ActivityRecord } from "@/services/activity";
 import { DashboardApi, type TotalBooksResp, type ActiveBorrowersResp, type BorrowedTodayResp, type OverdueResp } from "@/services/dashboardApi";
-import { X, RefreshCcw } from "lucide-react";
 import { connectDashboardRealtime, type DashboardEvent } from "@/services/dashboardRealtime";
+import { API } from "@/config/api";
+
+type ActivityItem = {
+  id: string;
+  userId: string;
+  action: string;
+  details?: string;
+  timestamp: string;
+};
 
 const Dashboard = () => {
   const { user } = useAuth();
   const userType: "student" | "admin" = user?.role ?? "student";
 
   const [live, setLive] = useState<LiveStats>(StatsService.get());
-  const [activity, setActivity] = useState<ActivityRecord[]>([]);
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+
+  // Live stats: local + backend summary
   useEffect(() => {
     const unsubStats = StatsService.subscribe(setLive);
     StatsService.start(3000);
-    const refresh = () => setActivity(ActivityService.list());
-    const unsubAct = ActivityService.subscribe(refresh);
-    refresh();
-    return () => { unsubStats(); unsubAct(); };
+    return () => { unsubStats(); StatsService.stop(); };
+  }, []);
+
+  // Recent Activity: always driven from backend activity_log so it reflects ALL users, not just this browser
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadActivity = async () => {
+      try {
+        const res = await fetch(`${API.BACKEND.BASE}/api/activity-log?limit=100`, { credentials: 'include' });
+        if (!res.ok) return;
+        const json = await res.json();
+        const items = Array.isArray(json.items) ? json.items : [];
+        if (cancelled) return;
+        const mapped: ActivityItem[] = items.map((row: any) => {
+          const ts = row.timestamp || row.created_at || new Date().toISOString();
+          const rawDetails = row.details;
+          let detailsText: string | undefined;
+          if (typeof rawDetails === 'string') {
+            detailsText = rawDetails;
+          } else if (rawDetails && typeof rawDetails === 'object') {
+            detailsText = rawDetails.summary || rawDetails.message || undefined;
+          }
+          return {
+            id: String(row.id ?? `${row.actor_id ?? row.user_id ?? 'ACT'}-${ts}`),
+            userId: String(row.actor_id ?? row.user_id ?? ''),
+            action: String(row.event ?? row.action ?? 'activity'),
+            details: detailsText,
+            timestamp: ts,
+          };
+        });
+        // newest first
+        mapped.sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
+        setActivity(mapped);
+      } catch {
+        // If backend is unreachable, show nothing instead of fake/demo data
+        if (!cancelled) setActivity([]);
+      }
+    };
+
+    loadActivity();
+    const id = setInterval(loadActivity, 5000); // ~real-time refresh
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   const stats = [
@@ -99,6 +147,24 @@ const Dashboard = () => {
     return out;
   }, [overlay, search, totalBooks, activeBorrowers, borrowedToday, overdueReturns]);
 
+  const formatActivityLine = (item: ActivityItem) => {
+    const cleanEvent = item.action.replace(/_/g, ' ');
+    let method: string | null = null;
+    if (item.details) {
+      const d = item.details.toLowerCase();
+      if (d.includes('manual')) method = 'manual';
+      else if (d.includes('qr')) method = 'QR';
+      else if (d.includes('auto') || d.includes('inactive')) method = 'auto';
+    }
+    if (item.userId && method) {
+      return `${item.userId} • ${cleanEvent} • ${method}`;
+    }
+    if (item.userId) {
+      return `${item.userId} • ${cleanEvent}`;
+    }
+    return cleanEvent;
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <Navbar userType={userType} />
@@ -145,7 +211,7 @@ const Dashboard = () => {
                     activity.slice(0, 25).map((a) => (
                       <div key={a.id} className="py-3 flex items-center justify-between">
                         <div>
-                          <p className="text-sm font-medium">{a.action.replace(/_/g,' ')}</p>
+                          <p className="text-sm font-medium">{formatActivityLine(a)}</p>
                           {a.details && <p className="text-xs text-muted-foreground">{a.details}</p>}
                         </div>
                         <p className="text-xs text-muted-foreground whitespace-nowrap">{new Date(a.timestamp).toLocaleString()}</p>

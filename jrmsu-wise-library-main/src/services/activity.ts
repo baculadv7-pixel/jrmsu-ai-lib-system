@@ -1,7 +1,8 @@
 export type ActivityAction =
   | 'login' | 'logout' | 'password_change' | 'email_update' | 'mobile_update'
   | 'profile_update' | 'qr_download' | 'qr_regenerate'
-  | '2fa_enable' | '2fa_disable' | 'settings_update';
+  | '2fa_enable' | '2fa_disable' | 'settings_update'
+  | 'auto_logout_inactive';
 
 export interface ActivityRecord {
   id: string;        // ACT-<timestamp>

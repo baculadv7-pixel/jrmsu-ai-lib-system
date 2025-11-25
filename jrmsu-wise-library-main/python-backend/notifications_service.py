@@ -255,16 +255,21 @@ class NotificationsService:
                 ORDER BY timestamp DESC 
                 LIMIT %s OFFSET %s
             """, (limit, offset))
-            
-            activities = cursor.fetchall()
-            
-            # Parse JSON fields
+
+            activities = cursor.fetchall() or []
+
+            # Parse JSON fields when possible; leave as raw string if not valid JSON
             for activity in activities:
-                if activity['details']:
-                    activity['details'] = json.loads(activity['details'])
-            
+                raw = activity.get('details')
+                if not raw:
+                    continue
+                try:
+                    activity['details'] = json.loads(raw)
+                except (ValueError, TypeError):
+                    # keep original value (likely plain text)
+                    activity['details'] = raw
+
             return activities
-            
 
 # Helper functions for common notification patterns
 
