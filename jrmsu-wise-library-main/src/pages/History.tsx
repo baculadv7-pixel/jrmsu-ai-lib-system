@@ -8,12 +8,28 @@ import { Search, Filter, Download, Calendar } from "lucide-react";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
-import { BorrowService, type BorrowRecord } from "@/services/borrow";
+import { API } from "@/config/api";
 import { NotificationsService } from "@/services/notifications";
+import { BorrowService } from "@/services/borrow";
 import { useAuth } from "@/context/AuthContext";
 import { useToast } from "@/hooks/use-toast";
 import { exportToXLSX } from "@/services/reports";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+
+const API_BASE = API.BACKEND.BASE;
+
+interface BackendBorrowHistoryRecord {
+  id: string;
+  borrowId: string;
+  bookId: string;
+  bookTitle: string;
+  userId: string;
+  studentId: string;
+  borrowDate: string;
+  dueDate: string;
+  returnDate?: string | null;
+  status: string;
+}
 
 const History = () => {
   const { user } = useAuth();
@@ -21,12 +37,53 @@ const History = () => {
   const userType: "student" | "admin" = user?.role ?? "student";
   const [searchTerm, setSearchTerm] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
-  const [historyData, setHistoryData] = useState<BorrowRecord[]>([]);
+  const [historyData, setHistoryData] = useState<BackendBorrowHistoryRecord[]>([]);
   const [showNoDataModal, setShowNoDataModal] = useState(false);
 
+  const loadHistory = useMemo(() => {
+    return async () => {
+      try {
+        if (!user?.id) {
+          setHistoryData([]);
+          return;
+        }
+        let url: string;
+        if (userType === 'admin') {
+          url = `${API_BASE}/api/library/borrow-history`;
+        } else {
+          url = `${API_BASE}/api/library/borrow-history/${encodeURIComponent(user.id)}`;
+        }
+        const res = await fetch(url, { credentials: 'include' });
+        if (!res.ok) {
+          console.error('Failed to load borrow history from backend');
+          setHistoryData([]);
+          return;
+        }
+        const data = await res.json();
+        const rows: any[] = Array.isArray(data.history) ? data.history : [];
+        const normalized: BackendBorrowHistoryRecord[] = rows.map((r: any) => ({
+          id: String(r.id ?? r.borrow_id ?? `BR-${r.user_id ?? ""}-${r.book_id ?? ""}`),
+          borrowId: String(r.borrow_id ?? r.id ?? ""),
+          bookId: String(r.book_id ?? ""),
+          bookTitle: String(r.book_title ?? r.title ?? ""),
+          userId: String(r.user_id ?? r.student_id ?? ""),
+          studentId: String(r.student_id ?? r.user_id ?? ""),
+          borrowDate: String(r.borrowed_at ?? r.borrow_date ?? ""),
+          dueDate: String(r.due_date ?? ""),
+          returnDate: r.returned_at ?? r.return_date ?? null,
+          status: String(r.status ?? ""),
+        }));
+        setHistoryData(normalized);
+      } catch (err) {
+        console.error('Error loading borrow history from backend:', err);
+        setHistoryData([]);
+      }
+    };
+  }, [user?.id, userType]);
+
   useEffect(() => {
-    setHistoryData(BorrowService.list());
-  }, []);
+    void loadHistory();
+  }, [loadHistory]);
 
   const filtered = useMemo(() => {
     const q = searchTerm.toLowerCase();
@@ -190,10 +247,40 @@ const History = () => {
                               <Button
                                 size="sm"
                                 variant="outline"
-                                onClick={() => {
-                                  BorrowService.returnBook(record.id);
-                                  setHistoryData(BorrowService.list());
-                                  NotificationsService.add({ receiverId: record.studentId, type: "return", message: `Returned ${record.bookTitle}` });
+                                onClick={async () => {
+                                  try {
+                                    const res = await fetch(`${API_BASE}/api/library/return-book`, {
+                                      method: 'POST',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      credentials: 'include',
+                                      body: JSON.stringify({
+                                        userId: record.studentId,
+                                        bookId: record.bookId,
+                                      }),
+                                    });
+                                    if (!res.ok) {
+                                      console.error('Failed to mark return via backend');
+                                      toast({
+                                        title: 'Return failed',
+                                        description: 'Backend did not accept the return request.',
+                                        variant: 'destructive',
+                                      });
+                                      return;
+                                    }
+                                    NotificationsService.add({ receiverId: record.studentId, type: 'return', message: `Returned ${record.bookTitle}` });
+                                    await loadHistory();
+                                    toast({
+                                      title: 'Book returned',
+                                      description: `${record.bookTitle} marked as returned.`,
+                                    });
+                                  } catch (err) {
+                                    console.error('Error calling return-book backend:', err);
+                                    toast({
+                                      title: 'Return failed',
+                                      description: 'Network or server error while returning book.',
+                                      variant: 'destructive',
+                                    });
+                                  }
                                 }}
                               >
                                 Mark Returned

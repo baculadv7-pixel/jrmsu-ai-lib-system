@@ -219,11 +219,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       throw new Error("Invalid QR Code. Missing authentication token.");
     }
 
-    // Fetch user from shared backend DB by declared type, then fallback to other type
+    // Fetch user from shared backend DB.
+    // Route STUDENT IDs to /api/students/... first based on ID pattern, regardless of qrData.userType,
+    // then fallback to the other type. This avoids 404s when a student QR is mis-tagged as "admin".
     const base = API.BACKEND.BASE;
-    const endpoints = qrData.userType === 'admin'
-      ? [`${base}/api/admins/${encodeURIComponent(qrData.userId)}`, `${base}/api/students/${encodeURIComponent(qrData.userId)}`]
-      : [`${base}/api/students/${encodeURIComponent(qrData.userId)}`, `${base}/api/admins/${encodeURIComponent(qrData.userId)}`];
+    const looksLikeStudentId = /^KC-\d{2}-[A-Z]-\d{3,6}$/.test(qrData.userId);
+    const looksLikeAdminId = /^KCL-\d{3,6}$/.test(qrData.userId);
+
+    let endpoints: string[];
+    if (looksLikeStudentId && !looksLikeAdminId) {
+      endpoints = [
+        `${base}/api/students/${encodeURIComponent(qrData.userId)}`,
+        `${base}/api/admins/${encodeURIComponent(qrData.userId)}`,
+      ];
+    } else if (looksLikeAdminId && !looksLikeStudentId) {
+      endpoints = [
+        `${base}/api/admins/${encodeURIComponent(qrData.userId)}`,
+        `${base}/api/students/${encodeURIComponent(qrData.userId)}`,
+      ];
+    } else {
+      // Fall back to the declared type ordering if pattern is ambiguous
+      endpoints = qrData.userType === 'admin'
+        ? [`${base}/api/admins/${encodeURIComponent(qrData.userId)}`, `${base}/api/students/${encodeURIComponent(qrData.userId)}`]
+        : [`${base}/api/students/${encodeURIComponent(qrData.userId)}`, `${base}/api/admins/${encodeURIComponent(qrData.userId)}`];
+    }
     let backendUser: any = null;
     for (const url of endpoints) {
       try {

@@ -51,10 +51,10 @@ export function BookPickupDialog({
           </div>
 
           <p className="text-base font-semibold text-center mb-2">
-            Do you have the {bookText} with you?
+            You have a reserved {bookText}. Would you like to scan it to borrow?
           </p>
           <p className="text-sm text-muted-foreground text-center">
-            If yes, we'll scan the QR code to confirm pickup.
+            If you choose Yes, we will open the book scanner and you must scan the QR code on the reserved book to borrow it.
           </p>
         </div>
 

@@ -10,6 +10,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useEffect, useMemo, useState } from "react";
 import { BooksService, type BookRecord, type CustomColumn, buildBookQrPayload } from "@/services/books";
 import { connectDashboardRealtime } from "@/services/dashboardRealtime";
+import { API } from "@/config/api";
 import QRCodeDisplay, { downloadCanvasAsPng } from "@/components/qr/QRCodeDisplay";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -25,6 +26,8 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+
+const API_BASE = API.BACKEND.BASE;
 
 const BookManagement = () => {
   const { user } = useAuth();
@@ -59,12 +62,30 @@ const BookManagement = () => {
   useEffect(() => {
     BooksService.ensureSeed();
     loadData();
+    // Initial backend-backed stats
+    void refreshBorrowAndReservationCounts();
   }, []);
 
   
   const loadData = () => {
     setBooks(BooksService.list());
     setCustomColumns(BooksService.getCustomColumns());
+  };
+
+  const refreshBorrowAndReservationCounts = async () => {
+    try {
+      const [brRes, rvRes] = await Promise.all([
+        fetch(`${API_BASE}/api/library/borrowed-all`).then(r => r.ok ? r.json() : { borrowed: [] }).catch(() => ({ borrowed: [] })),
+        fetch(`${API_BASE}/api/library/reservations-all`).then(r => r.ok ? r.json() : { reservations: [] }).catch(() => ({ reservations: [] })),
+      ]);
+      const b = Array.isArray(brRes.borrowed) ? brRes.borrowed : [];
+      const rv = Array.isArray(rvRes.reservations) ? rvRes.reservations : [];
+      setBorrowedCount(b.length);
+      setReservationCount(rv.length);
+    } catch {
+      setBorrowedCount(0);
+      setReservationCount(0);
+    }
   };
 
   const [sortBy, setSortBy] = useState<'title' | 'author' | 'category' | 'date'>('title');
@@ -80,6 +101,8 @@ const BookManagement = () => {
   const [overlaySearch, setOverlaySearch] = useState("");
   const [borrowedData, setBorrowedData] = useState<any[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [borrowedCount, setBorrowedCount] = useState(0);
+  const [reservationCount, setReservationCount] = useState(0);
 
   // Hydrate admin preferences (run after state creation)
   useEffect(() => {
@@ -229,10 +252,11 @@ const BookManagement = () => {
 
   const fetchBorrowed = async () => {
     try {
-      const res = await fetch('http://localhost:5000/api/borrows/active', { credentials: 'include' });
+      const res = await fetch(`${API_BASE}/api/library/borrowed-all`, { credentials: 'include' });
       if (res.ok) {
         const data = await res.json();
-        setBorrowedData(Array.isArray(data.items) ? data.items : []);
+        const rows: any[] = Array.isArray(data.borrowed) ? data.borrowed : [];
+        setBorrowedData(rows);
       } else {
         setBorrowedData([]);
       }
@@ -326,7 +350,7 @@ const BookManagement = () => {
             </div>
 
             {/* Quick Stats */}
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
               <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowTotal(true); }}>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -356,7 +380,18 @@ const BookManagement = () => {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <div className="text-2xl font-bold text-accent">{books.filter(b=>b.status!=='available').length}</div>
+                  <div className="text-2xl font-bold text-accent">{borrowedCount}</div>
+                </CardContent>
+              </Card>
+
+              <Card className="shadow-jrmsu cursor-pointer" onClick={() => { setOverlaySearch(""); setShowReservations(true); }}>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-muted-foreground">
+                    Reservations
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{reservationCount}</div>
                 </CardContent>
               </Card>
 
@@ -530,14 +565,15 @@ const BookManagement = () => {
                           </td>
                           <td className="p-3">
                             <div className="flex justify-center">
-                              {/* Smaller on-screen QR, but render at full internal resolution for sharp downloads */}
-                              <div className="w-[96px] h-[96px] flex items-center justify-center bg-white rounded-md border">
-                                <QRCodeDisplay
-                                  data={buildBookQrPayload(book)}
-                                  size={96}          // visual size in the table
-                                  internalSize={256} // internal resolution for clear downloads & scanning
-                                  centerLabel="JRMSU–Library"
-                                />
+                              {/* Compact QR preview for table row; underlying canvas stays high-res for download */}
+                              <div className="w-16 h-16 flex items-center justify-center bg-white rounded-md border">
+                                <div className="scale-75">
+                                  <QRCodeDisplay
+                                    data={buildBookQrPayload(book)}
+                                    size={128}
+                                    centerLabel="JRMSU–Library"
+                                  />
+                                </div>
                               </div>
                             </div>
                           </td>

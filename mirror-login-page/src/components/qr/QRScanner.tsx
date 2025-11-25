@@ -16,6 +16,15 @@ interface CameraDevice {
 interface QRScannerProps {
   onScanSuccess: (data: string) => void;
   onError: (error: string) => void;
+  /**
+   * Optional DOM id for the underlying HTML5-QRCode container.
+   *
+   * Defaults to 'qr-scanner-container' for backwards compatibility with the
+   * login/logout scanner. For specialized usages (like the book scanner
+   * dialog), pass a unique id so multiple scanners don't fight over the same
+   * element.
+   */
+  containerId?: string;
 }
 
 interface DiagnosticsInfo {
@@ -28,7 +37,7 @@ interface DiagnosticsInfo {
   timestamp: string;
 }
 
-export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
+export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-container' }: QRScannerProps) {
   const [isActive, setIsActive] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -182,7 +191,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
         attempts++;
         console.log(`🔍 Checking for scanner container, attempt ${attempts}/${maxAttempts}`);
 
-        const container = (containerRef.current as HTMLElement | null) || (document.getElementById('qr-scanner-container') as HTMLElement | null);
+        const container = (containerRef.current as HTMLElement | null) || (document.getElementById(containerId) as HTMLElement | null);
 
         if (container) {
           // Force container to be visible
@@ -358,7 +367,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
       await waitForDOMReady();
       
       // First check if container exists immediately
-      let containerElement = (containerRef.current as HTMLElement | null) || (document.getElementById('qr-scanner-container') as HTMLElement | null);
+      let containerElement = (containerRef.current as HTMLElement | null) || (document.getElementById(containerId) as HTMLElement | null);
       
       if (!containerElement) {
         console.log('⚠️ Container not found, waiting for it...');
@@ -405,7 +414,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
       console.log('📹 Camera constraints:', cameraConstraints);
       
       // Initialize HTML5-QRCode
-      html5QrCodeRef.current = new Html5Qrcode('qr-scanner-container');
+      html5QrCodeRef.current = new Html5Qrcode(containerId);
       
       // SIMPLE RELIABLE scanner configuration - focus on WORKING not features
       const scannerConfig = {
@@ -451,7 +460,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
         }
         
         // Show immediate success feedback with enhanced login loading card
-        const container = (containerRef.current as HTMLElement | null) || (document.getElementById('qr-scanner-container') as HTMLElement | null);
+        const container = (containerRef.current as HTMLElement | null) || (document.getElementById(containerId) as HTMLElement | null);
         if (container) {
           // Create QR detection success overlay similar to manual login loading
           const successOverlay = document.createElement('div');
@@ -612,7 +621,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
             if (octx) octx.clearRect(0, 0, ov.width, ov.height);
           }
 
-          const container = (containerRef.current as HTMLElement | null) || (document.getElementById('qr-scanner-container') as HTMLElement | null);
+          const container = (containerRef.current as HTMLElement | null) || (document.getElementById(containerId) as HTMLElement | null);
           const video = container?.querySelector('video') as HTMLVideoElement;
           
           if (video && video.videoWidth > 0 && video.videoHeight > 0) {
@@ -664,11 +673,22 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
                 const scaleY = containerEl.clientHeight / (overlay.height || 1);
                 const boxW = Math.max(8, (maxX - minX));
                 const boxH = Math.max(8, (maxY - minY));
+                let left = minX * scaleX;
+                let top = minY * scaleY;
+                let width = boxW * scaleX;
+                let height = boxH * scaleY;
+                // Clamp box fully inside the visible camera area
+                const maxWidth = containerEl.clientWidth;
+                const maxHeight = containerEl.clientHeight;
+                if (left < 0) { width += left; left = 0; }
+                if (top < 0) { height += top; top = 0; }
+                if (left + width > maxWidth) { width = Math.max(8, maxWidth - left); }
+                if (top + height > maxHeight) { height = Math.max(8, maxHeight - top); }
                 setBox({
-                  left: Math.max(0, minX * scaleX),
-                  top: Math.max(0, minY * scaleY),
-                  width: boxW * scaleX,
-                  height: boxH * scaleY,
+                  left,
+                  top,
+                  width,
+                  height,
                 });
                 // Dynamic zoom: if QR is too small (far) or too large (near)
                 try {
@@ -882,7 +902,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
 
   // Force container visibility and video display when scanner is active/initializing
   useEffect(() => {
-    const container = document.getElementById('qr-scanner-container');
+    const container = document.getElementById(containerId);
     if (container && (isActive || isInitializing)) {
       container.style.display = 'block';
       container.style.visibility = 'visible';
@@ -915,7 +935,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
   // Centered idle bounding box until detection begins
   useEffect(() => {
     if (!isActive || hasDetectionRef.current) return;
-    const container = document.getElementById('qr-scanner-container');
+    const container = document.getElementById(containerId);
     if (!container) return;
     const cw = container.clientWidth, ch = container.clientHeight;
     const size = Math.min(cw, ch) * 0.45; // 45% of the smaller dimension
@@ -1092,7 +1112,7 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
             <div className="relative">
               {/* HTML5-QRCode Container - Always visible and mounted */}
               <div 
-                id="qr-scanner-container"
+                id={containerId}
                 ref={containerRef}
                 className="w-full mx-auto bg-black rounded-lg shadow-lg overflow-hidden block"
                 style={{ 

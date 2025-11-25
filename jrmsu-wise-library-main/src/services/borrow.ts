@@ -57,7 +57,15 @@ function normalizeStatuses(records: BorrowRecord[]): BorrowRecord[] {
 
 export const BorrowService = {
   list(): BorrowRecord[] {
+    // Full history (borrowed + returned + overdue)
     return normalizeStatuses(readAll());
+  },
+  /**
+   * Active borrows only (borrowed or overdue, not returned).
+   * Used for dashboard stats so "Borrowed" counts only current loans.
+   */
+  active(): BorrowRecord[] {
+    return normalizeStatuses(readAll()).filter(r => r.status === "borrowed" || r.status === "overdue");
   },
   borrow(bookId: string, studentId: string): BorrowRecord {
     const book = BooksService.get(bookId);

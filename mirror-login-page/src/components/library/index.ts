@@ -3,3 +3,4 @@ export { BookReturnDialog } from './BookReturnDialog';
 export { BookScannerDialog } from './BookScannerDialog';
 export { LogoutBookScan } from './LogoutBookScan';
 export { CancelReservationButton } from './CancelReservationButton';
+export { BorrowReturnPromptDialog } from './BorrowReturnPromptDialog';

@@ -69,16 +69,20 @@ function formatFullNameSurnameFirst(fullname: string): string {
   return `${lastParts.join(' ')}, ${firstParts.join(' ')}`.trim();
 }
 
-export function ActiveSessionsPanel() {
+interface ActiveSessionsPanelProps {
+  currentUserId?: string | null;
+  onLogoutCurrentUser?: () => void;
+}
+
+export function ActiveSessionsPanel({ currentUserId, onLogoutCurrentUser }: ActiveSessionsPanelProps) {
   const [sessions, setSessions] = useState<ActiveSessionItem[]>([]);
   const [search, setSearch] = useState("");
-  const [recent, setRecent] = useState<Record<string, { item: ActiveSessionItem; until: number }>>({});
   const [loggingOutId, setLoggingOutId] = useState<string | null>(null);
   const [info, setInfo] = useState<string>("");
   const [loading, setLoading] = useState(false);
-  const [showRecent, setShowRecent] = useState(true);
   const [visibleByHour, setVisibleByHour] = useState<Record<string, number>>({});
   const socketRef = useRef<Socket | null>(null);
+  const [idleSpin, setIdleSpin] = useState(false);
 
   async function load(q?: string) {
     try {
@@ -101,47 +105,43 @@ export function ActiveSessionsPanel() {
   }
 
   useEffect(() => {
+    // Initial load of active sessions when panel mounts
     load();
+    // Realtime updates from backend (login/logout, forced logout, etc.)
     const s = io(API_BASE, { transports: ['websocket','polling'], withCredentials: true, reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 500 });
     socketRef.current = s;
     s.on('session_update', (payload: any) => {
       if (payload?.type === 'logout' && payload?.userId) {
         const now = Math.floor(Date.now()/1000);
-        setRecent(prev => ({
-          ...prev,
-          [payload.userId]: {
-            item: prev[payload.userId]?.item || { userId: payload.userId, fullname: payload.fullname || payload.userId, userType: (payload.userType || 'student').toLowerCase(), loginTime: now },
-            until: now + 60,
-          }
-        }));
-        setTimeout(() => {
-          setRecent(prev => {
-            const cp = { ...prev };
-            delete cp[payload.userId];
-            return cp;
-          });
-        }, 60*1000);
+        // Optimistically remove from active list immediately
+        setSessions(prev => prev.filter(s => s.userId !== payload.userId));
       }
+      // Always re-sync with backend so newly logged-in sessions also appear
       load(search);
     });
     s.on('session_cleanup', () => load(search));
-    // Polling fallback every 5s to guarantee freshness
-    const poll = setInterval(() => load(search), 5000);
-    return () => { s.close(); clearInterval(poll); };
+    // Cleanup socket on unmount
+    return () => { s.close(); };
   }, []);
+
+  // Idle auto-refresh: every 3 seconds, spin the refresh icon AND reload sessions (same as clicking the button)
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (loading) return;
+      setIdleSpin(true);
+      // Trigger a real refresh using the current search query
+      void load(search);
+      setTimeout(() => setIdleSpin(false), 600);
+    }, 3000);
+    return () => clearInterval(id);
+  }, [loading, search]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const base = q
+    return q
       ? sessions.filter(x => x.userId.toLowerCase().includes(q) || x.fullname.toLowerCase().includes(q) || x.userType.includes(q))
       : sessions;
-    // include recent logged-out items (optional)
-    const now = Math.floor(Date.now()/1000);
-    const recents = showRecent
-      ? Object.values(recent).filter(r => r.until > now).map(r => r.item)
-      : [];
-    return [...base, ...recents];
-  }, [search, sessions, recent, showRecent]);
+  }, [search, sessions]);
 
   const groups: DateGroup[] = useMemo(() => {
     // First group by date MM-DD-YYYY
@@ -186,6 +186,22 @@ export function ActiveSessionsPanel() {
   }, [filtered]);
 
   async function forceLogout(userId: string) {
+    // If this is the currently logged-in user and a higher-level logout handler is provided,
+    // delegate to that so borrow/return overlays can run before ending the session.
+    if (currentUserId && onLogoutCurrentUser && userId === currentUserId) {
+      setLoggingOutId(userId);
+      setInfo("");
+      try {
+        await onLogoutCurrentUser();
+        const now = Math.floor(Date.now()/1000);
+        setSessions(prev => prev.filter(s => s.userId !== userId));
+        setInfo(`User ${userId} logged out.`);
+      } finally {
+        setLoggingOutId(null);
+      }
+      return;
+    }
+
     try {
       setLoggingOutId(userId);
       setInfo("");
@@ -206,15 +222,9 @@ export function ActiveSessionsPanel() {
           throw new Error(t || `Logout failed (${res2.status})`);
         }
       }
-      // Optimistic UI: mark as recently logged out so button hides
+      // Optimistic UI: remove from active list immediately
       const now = Math.floor(Date.now()/1000);
-      setRecent(prev => ({
-        ...prev,
-        [userId]: {
-          item: prev[userId]?.item || { userId, fullname: userId, userType: 'student', loginTime: now },
-          until: now + 60
-        }
-      }));
+      setSessions(prev => prev.filter(s => s.userId !== userId));
       setInfo(`User ${userId} logged out.`);
       await load(search);
     } catch (e: any) {
@@ -230,13 +240,10 @@ export function ActiveSessionsPanel() {
     <Card className="h-full">
       <CardHeader className="flex items-center justify-between gap-3">
         <CardTitle>Active Sessions</CardTitle>
-        <div className="flex items-center gap-3">
-          <label className="flex items-center gap-2 text-xs text-gray-600">
-            <input type="checkbox" checked={showRecent} onChange={e=>setShowRecent(e.target.checked)} />
-            Show recently ended (60s)
-          </label>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-500">Auto-refresh</span>
           <Button variant="outline" size="sm" onClick={()=> load(search)} title="Refresh">
-            <RefreshCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCcw className={`h-4 w-4 ${loading || idleSpin ? 'animate-spin' : ''}`} />
           </Button>
         </div>
       </CardHeader>
@@ -274,20 +281,17 @@ export function ActiveSessionsPanel() {
                         return (
                           <>
                             {slice.map((it, idx) => {
-                              const isRecent = !!recent[it.userId];
                               const ts = formatRowTimestamp(it.loginTime);
                               const name = formatFullNameSurnameFirst(it.fullname);
                               return (
                                 <div key={`${it.userId}-${idx}`} className={`min-w-[1120px]`}>
-                                  <div className={`grid [grid-template-columns:180px_220px_minmax(300px,1fr)_140px_120px] items-center px-3 py-2 text-sm ${isRecent ? 'bg-gray-50' : 'bg-blue-50/30'} text-gray-900`}>
+                                  <div className={`grid [grid-template-columns:180px_220px_minmax(300px,1fr)_140px_120px] items-center px-3 py-2 text-sm bg-blue-50/30 text-gray-900`}>
                                     <div className="font-mono whitespace-nowrap">{ts.time}</div>
                                     <div className="font-semibold truncate" title={it.userId}>{it.userId}</div>
                                     <div className="break-words whitespace-normal" title={it.fullname}>{name}</div>
                                     <div className="capitalize whitespace-nowrap">{it.userType}</div>
                                     <div className="text-right sticky right-0 bg-inherit">
-                                      {!isRecent && (
-                                        <Button size="sm" variant="destructive" disabled={loggingOutId===it.userId} onClick={() => forceLogout(it.userId)}>{loggingOutId===it.userId? '...' : 'Logout'}</Button>
-                                      )}
+                                      <Button size="sm" variant="destructive" disabled={loggingOutId===it.userId} onClick={() => forceLogout(it.userId)}>{loggingOutId===it.userId? '...' : 'Logout'}</Button>
                                     </div>
                                   </div>
                                 </div>

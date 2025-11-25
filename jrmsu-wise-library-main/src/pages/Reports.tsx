@@ -7,18 +7,19 @@ import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import AIAssistant from "@/components/Layout/AIAssistant";
 import { exportToPDF, exportToXLSX } from "@/services/reports";
-import { BorrowService } from "@/services/borrow";
-import { BooksService } from "@/services/books";
 import React, { useEffect, useMemo, useState } from "react";
 import { StatsService, type LiveStats } from "@/services/stats";
 import { useToast } from "@/hooks/use-toast";
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { API } from "@/config/api";
 
 type TimeRangeKey = 'today' | '7d' | '30d' | '12m';
 
 interface StatsPoint extends LiveStats {
   ts: number;
 }
+
+const API_BASE = API.BACKEND.BASE;
 
 const Reports = () => {
   const userType: "student" | "admin" = "admin";
@@ -35,7 +36,9 @@ const Reports = () => {
   const [openActive, setOpenActive] = useState(false);
   const [openOverdue, setOpenOverdue] = useState(false);
 
-  // Subscribe to backend-powered live stats and record history for charts
+  const [circulationRows, setCirculationRows] = useState<any[]>([]);
+  const [inventoryRows, setInventoryRows] = useState<any[]>([]);
+
   useEffect(() => {
     const unsub = StatsService.subscribe((stats) => {
       setLive(stats);
@@ -48,32 +51,54 @@ const Reports = () => {
     return unsub;
   }, []);
 
-  const circulationRows = useMemo(() => {
-    const all = BorrowService.list();
-    return all.map((r) => ({
-      Transaction: r.id,
-      Book: r.bookTitle,
-      BookCode: r.bookId,
-      StudentID: r.studentId,
-      Borrowed: r.borrowDate,
-      Due: r.dueDate,
-      Returned: r.returnDate ?? "",
-      Status: r.status,
-    }));
-  }, []);
+  // Backend-driven circulation (borrow history) and inventory
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const [histRes, booksRes] = await Promise.all([
+          fetch(`${API_BASE}/api/library/borrow-history`, { credentials: 'include' }),
+          fetch(`${API_BASE}/api/books`, { credentials: 'include' }),
+        ]);
+        let circ: any[] = [];
+        if (histRes.ok) {
+          const data = await histRes.json();
+          const rows: any[] = Array.isArray(data.history) ? data.history : [];
+          circ = rows.map((r: any) => ({
+            Transaction: String(r.borrow_id ?? r.id ?? ''),
+            Book: String(r.book_title ?? r.title ?? ''),
+            BookCode: String(r.book_id ?? ''),
+            StudentID: String(r.user_id ?? r.student_id ?? ''),
+            Borrowed: String(r.borrowed_at ?? r.borrow_date ?? ''),
+            Due: String(r.due_date ?? ''),
+            Returned: r.returned_at ?? r.return_date ?? '',
+            Status: String(r.status ?? ''),
+          }));
+        }
+        setCirculationRows(circ);
 
-  const inventoryRows = useMemo(() => {
-    const all = BooksService.list();
-    return all.map((b) => ({
-      Code: b.id,
-      Title: b.title,
-      Author: b.author,
-      Category: b.category,
-      ISBN: b.isbn ?? "",
-      Copies: b.copies,
-      Available: b.available,
-      Status: b.status,
-    }));
+        let inv: any[] = [];
+        if (booksRes.ok) {
+          const bdata = await booksRes.json();
+          const items: any[] = Array.isArray(bdata.items) ? bdata.items : [];
+          inv = items.map((b: any) => ({
+            Code: String(b.id ?? b.book_code ?? ''),
+            Title: String(b.title ?? ''),
+            Author: String(b.author ?? ''),
+            Category: String(b.category ?? ''),
+            ISBN: String(b.isbn ?? ''),
+            Copies: Number(b.total_copies ?? b.copies ?? 0),
+            Available: Number(b.available_copies ?? b.available ?? 0),
+            Status: String(b.status ?? ''),
+          }));
+        }
+        setInventoryRows(inv);
+      } catch (err) {
+        console.error('Error loading report data from backend:', err);
+        setCirculationRows([]);
+        setInventoryRows([]);
+      }
+    };
+    load();
   }, []);
 
   const overdueRows = useMemo(() => circulationRows.filter((r) => r.Status === "overdue"), [circulationRows]);
@@ -98,15 +123,17 @@ const Reports = () => {
         if (tb?.items) setTopBorrowed(tb.items);
         if (cd?.items) setCategoryDist(cd.items);
         if ((!tb?.items || !cd?.items)) {
-          // Fallback to client-side computation
+          // Fallback to simple client-side computation using already-loaded rows
           const counts: Record<string, number> = {};
-          BorrowService.list().forEach(b => { counts[b.bookTitle] = (counts[b.bookTitle]||0)+1; });
-          const tbLocal = Object.entries(counts).map(([title, borrows]) => ({ title, borrows })).sort((a,b)=> b.borrows - a.borrows).slice(0,5);
+          circulationRows.forEach(b => { counts[b.Book] = (counts[b.Book] || 0) + 1; });
+          const tbLocal = Object.entries(counts)
+            .map(([title, borrows]) => ({ title, borrows: borrows as number }))
+            .sort((a, b) => b.borrows - a.borrows)
+            .slice(0, 5);
           setTopBorrowed(tbLocal);
           const counts2: Record<string, number> = {};
-          const books = BooksService.list();
-          books.forEach(b => { counts2[b.category] = (counts2[b.category]||0)+1; });
-          const total = books.length || 1;
+          inventoryRows.forEach(b => { counts2[b.Category] = (counts2[b.Category] || 0) + 1; });
+          const total = inventoryRows.length || 1;
           const cdLocal = Object.entries(counts2).map(([category, count]) => ({ category, percentage: Math.round((count/total)*100) }));
           setCategoryDist(cdLocal);
         }

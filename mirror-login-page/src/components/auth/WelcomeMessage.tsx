@@ -161,6 +161,10 @@ export function useWelcomeMessage() {
     mode?: "login" | "logout";
   } | null>(null);
 
+  // Optional: persist the last message mode in memory only, so a full reload
+  // never replays an old logout banner on a "fresh" visit.
+  // We intentionally do NOT store this in localStorage.
+
   const showWelcome = (firstName: string, userRole: UserRole, mode: "login" | "logout" = "login") => {
     setUserData({ firstName, userRole, mode });
     setIsVisible(true);

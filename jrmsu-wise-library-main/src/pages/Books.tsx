@@ -18,13 +18,37 @@ import { useAuth } from "@/context/AuthContext";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { BooksService, type BookRecord } from "@/services/books";
-import { BorrowService } from "@/services/borrow";
-import { ReservationsService } from "@/services/reservations";
 import { NotificationsService } from "@/services/notifications";
+import { ReservationsService } from "@/services/reservations";
 import { useToast } from "@/hooks/use-toast";
+import { API } from "@/config/api";
 import QRCodeDisplay from "@/components/qr/QRCodeDisplay";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { aiSearchService, type SearchSuggestion, type SearchResult } from "@/services/aiSearchService";
+
+const API_BASE = API.BACKEND.BASE;
+
+type BackendBorrowRecord = {
+  borrowId: string;
+  userId: string;
+  userType: string;
+  bookId: string;
+  bookTitle: string;
+  borrowedAt: string;
+  dueDate: string;
+  returnedAt: string | null;
+  status: 'borrowed' | 'overdue';
+};
+
+type BackendReservationRecord = {
+  reservationId: string;
+  userId: string;
+  userType: string;
+  bookId: string;
+  bookTitle: string;
+  reservedAt: string;
+  quantity?: number;
+};
 
 const Books = () => {
   const { user } = useAuth();
@@ -42,12 +66,137 @@ const Books = () => {
   const [searchSuggestions, setSearchSuggestions] = useState<SearchSuggestion[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [statsModal, setStatsModal] = useState<'total'|'available'|'categories'|'borrowed'|'reservations'|null>(null);
+  const [borrowedRecords, setBorrowedRecords] = useState<BackendBorrowRecord[]>([]);
+  const [reservationRecords, setReservationRecords] = useState<BackendReservationRecord[]>([]);
+  const [reserveDialogOpen, setReserveDialogOpen] = useState(false);
+  const [reserveTargetBook, setReserveTargetBook] = useState<BookRecord | null>(null);
+  const [reserveQuantity, setReserveQuantity] = useState<number>(1);
+  const [isSubmittingReserve, setIsSubmittingReserve] = useState(false);
+  const [recentlyReserved, setRecentlyReserved] = useState<Record<string, boolean>>({});
   const setView = (m: any) => { setViewMode(m); };
 
   useEffect(() => {
     BooksService.ensureSeed();
     setBooks(BooksService.list());
   }, []);
+
+  // Load borrowed books summary from backend (per-user for students, all for admins)
+  const loadBorrowed = useCallback(async () => {
+    try {
+      if (!user?.id) {
+        setBorrowedRecords([]);
+        return;
+      }
+      let url: string;
+      if (userType === 'admin') {
+        url = `${API_BASE}/api/library/borrowed-all`;
+      } else {
+        url = `${API_BASE}/api/library/user-borrowed/${encodeURIComponent(user.id)}`;
+      }
+      const res = await fetch(url);
+      if (!res.ok) {
+        console.error('Failed to load borrowed books from backend');
+        setBorrowedRecords([]);
+        return;
+      }
+      const data = await res.json();
+      const rows: any[] = Array.isArray(data.borrowed) ? data.borrowed : [];
+      const today = new Date();
+      const normalized: BackendBorrowRecord[] = rows.map((r) => {
+        const borrowedAt = r.borrowed_at || r.borrowedAt;
+        const dueDateStr = r.due_date || r.dueDate;
+        const returnedAt = r.returned_at || r.returnedAt || null;
+        const due = dueDateStr ? new Date(dueDateStr) : null;
+        const isOverdue = !returnedAt && due && due < today;
+        return {
+          borrowId: r.borrow_id || r.borrowId || r.id,
+          userId: r.user_id || r.userId,
+          userType: r.user_type || r.userType || 'student',
+          bookId: r.book_id || r.bookId,
+          bookTitle: r.book_title || r.bookTitle || r.title,
+          borrowedAt: borrowedAt,
+          dueDate: dueDateStr,
+          returnedAt,
+          status: isOverdue ? 'overdue' : 'borrowed',
+        };
+      });
+      setBorrowedRecords(normalized);
+    } catch (err) {
+      console.error('Error loading borrowed books from backend:', err);
+      setBorrowedRecords([]);
+    }
+  }, [user?.id, userType]);
+
+  // Initial load of borrowed data
+  useEffect(() => {
+    void loadBorrowed();
+  }, [loadBorrowed]);
+
+  // Load reservations summary from backend
+  // - For STUDENT view: only this user's pending reservations
+  // - For ADMIN view: all users' pending reservations
+  const loadReservations = useCallback(async () => {
+    try {
+      if (!user?.id) {
+        setReservationRecords([]);
+        return;
+      }
+
+      let rows: any[] = [];
+
+      if (userType === 'student') {
+        // Student: query backend for this user's real DB reservations so that
+        // mirror-side borrowing (which fulfills reservations) is reflected in
+        // the stats cards and the "Book Reservations" dialog.
+        const res = await fetch(`${API_BASE}/api/library/user-reservations/${encodeURIComponent(user.id)}`);
+        if (res.ok) {
+          const data = await res.json();
+          rows = Array.isArray(data.reservations) ? data.reservations : [];
+        } else {
+          console.error('Failed to load user reservations from backend');
+        }
+      } else {
+        // Admin: see all students' reservations
+        const res = await fetch(`${API_BASE}/api/library/reservations-all`);
+        if (res.ok) {
+          const data = await res.json();
+          rows = Array.isArray(data.reservations) ? data.reservations : [];
+        } else {
+          console.error('Failed to load reservations from backend');
+        }
+      }
+
+      const normalized: BackendReservationRecord[] = rows.map((r) => ({
+        reservationId: r.id || r.reservation_id,
+        userId: r.user_id || r.userId,
+        userType: r.user_type || r.userType || 'student',
+        bookId: r.book_id || r.bookId,
+        bookTitle: r.book_title || r.bookTitle || r.title,
+        reservedAt: r.reserved_at || r.reservedAt,
+        quantity: r.quantity ?? 1,
+      }));
+
+      setReservationRecords(normalized);
+    } catch (err) {
+      console.error('Error loading reservations:', err);
+      setReservationRecords([]);
+    }
+  }, [user?.id, userType]);
+
+  useEffect(() => {
+    void loadReservations();
+  }, [loadReservations]);
+
+  // Periodically refresh reservations and borrowed stats so that
+  // changes made from the mirror page (QR borrow/return) are reflected
+  // without requiring a manual page refresh.
+  useEffect(() => {
+    const id = setInterval(() => {
+      void loadReservations();
+      void loadBorrowed();
+    }, 10000); // every 10 seconds
+    return () => clearInterval(id);
+  }, [loadReservations, loadBorrowed]);
 
   // Hydrate preferences
   useEffect(() => {
@@ -131,7 +280,7 @@ const Books = () => {
       let arr = aiSearchResults.map(r => r.book);
       
       // Apply filters
-      const reservedIds = new Set(ReservationsService.list().map(r=>r.bookId));
+      const reservedIds = new Set(reservationRecords.map(r=>r.bookId));
       if (filterCategory !== 'all') arr = arr.filter(b => b.category.toLowerCase() === filterCategory);
       if (filterAvailability !== 'all') {
         if (filterAvailability === 'available') arr = arr.filter(b => b.status === 'available');
@@ -144,7 +293,7 @@ const Books = () => {
     
     // Standard search fallback
     const q = searchQuery.toLowerCase();
-    const reservedIds = new Set(ReservationsService.list().map(r=>r.bookId));
+    const reservedIds = new Set(reservationRecords.map(r=>r.bookId));
     let arr = books.filter((b) => [b.id, b.title, b.author, b.category, b.isbn ?? ""].some((t) => t.toLowerCase().includes(q)));
     if (filterCategory !== 'all') arr = arr.filter(b => b.category.toLowerCase() === filterCategory);
     if (filterAvailability !== 'all') {
@@ -164,29 +313,71 @@ const Books = () => {
   }, [books, searchQuery, sortBy, sortOrder, filterCategory, filterAvailability, useAISearch, aiSearchResults]);
 
   const reserve = (book: BookRecord) => {
+    // Always allow reserving again; multiple reservations for same book will
+    // simply add more rows/quantity to the reservations list.
+    setReserveTargetBook(book);
+    setReserveQuantity(1);
+    setReserveDialogOpen(true);
+  };
+
+  const confirmReserve = async () => {
+    if (!reserveTargetBook || reserveQuantity <= 0) {
+      toast({ title: 'Invalid quantity', description: 'Please enter a quantity of at least 1.', variant: 'destructive' });
+      return;
+    }
     try {
+      setIsSubmittingReserve(true);
+      const book = reserveTargetBook;
       const studentId = user?.id ?? 'KC-XX-X-00000';
       const studentName = user?.fullName ?? 'Student';
-      // Prevent duplicate reservations for same book+student
-      const existing = ReservationsService.byBook(book.id).find(r => r.studentId === studentId);
-      if (existing) {
-        toast({ title: 'Already reserved', description: `${book.title} is already reserved by you.`, variant: 'default' });
-        return;
+
+      const res = await fetch(`${API_BASE}/api/library/reserve-book`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: studentId,
+          userType: userType,
+          bookId: book.id,
+          bookTitle: book.title,
+          quantity: reserveQuantity,
+        }),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || 'Failed to create reservation in library system');
       }
-      ReservationsService.add(book.id, book.title, studentId, studentName);
-      NotificationsService.add({ receiverId: 'ADMIN', type: 'system', message: `Reservation: ${studentId} reserved ${book.title}` });
-      toast({ title: 'Reserved', description: `${book.title} reserved. Please proceed to the library mirror scanner to borrow.` });
-      // Assistant Mode: Study Helper (toggle) — open AI and provide book overview on reserve
+
+      // Persist a localStorage reservation so the UI has a reliable source
+      // for the Book Reservations card and survives refresh.
+      ReservationsService.add(book.id, book.title, studentId, studentName, reserveQuantity);
+
+      // Mark this book as recently reserved so the button text can flash
+      // "Reserved" for a few seconds, then revert back to "Reserve" while
+      // the reservation remains in the list.
+      setRecentlyReserved(prev => ({ ...prev, [book.id]: true }));
+      setTimeout(() => {
+        setRecentlyReserved(prev => ({ ...prev, [book.id]: false }));
+      }, 3000);
+
+      // Re-sync reservations so counts and dialogs update.
+      await loadReservations();
+
+      // Notify all admins via centralized notification manager so it appears in their bell icon
       try {
-        const uid = user?.id ?? 'guest';
-        const { PreferenceService } = require("@/services/preferences");
-        const prefs = PreferenceService.load(uid);
-        if (prefs.aiStudyEnabled) {
-          window.dispatchEvent(new CustomEvent('jrmsu:book-selected', { detail: { book: { title: book.title, author: book.author, isbn: book.isbn, category: book.category, summary: book.summary } } }));
-        }
-      } catch { /* noop */ }
+        const { NotificationManager } = require("@/services/notificationManager");
+        NotificationManager.bookReserved(studentId, studentName, book.id, book.title);
+      } catch {
+        NotificationsService.add({ receiverId: 'ADMIN', type: 'system', message: `Reservation: ${studentId} reserved ${book.title}` });
+      }
+
+      toast({ title: 'Reserved', description: `${book.title} reserved (${reserveQuantity} cop${reserveQuantity > 1 ? 'ies' : 'y'}). Please proceed to the library mirror scanner to borrow.` });
+      setReserveDialogOpen(false);
+      setReserveTargetBook(null);
     } catch (e: any) {
       toast({ title: 'Cannot reserve', description: e?.message ?? '', variant: 'destructive' });
+    } finally {
+      setIsSubmittingReserve(false);
     }
   };
 
@@ -233,8 +424,8 @@ const Books = () => {
                   <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('total')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Total Books</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-primary">{books.length}</div></CardContent></Card>
                   <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('available')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Available</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-leaf">{books.filter(b=>b.status==='available').length}</div></CardContent></Card>
                   <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('categories')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Categories</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-secondary">{Array.from(new Set(books.map(b=>b.category))).length}</div></CardContent></Card>
-                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('borrowed')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Borrowed</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-accent">{BorrowService.list().length}</div></CardContent></Card>
-                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('reservations')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Reservations</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{ReservationsService.list().length}</div></CardContent></Card>
+                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('borrowed')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Borrowed</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold text-accent">{borrowedRecords.length}</div></CardContent></Card>
+                  <Card className="hover:bg-muted cursor-pointer transition-colors" onClick={()=>setStatsModal('reservations')}><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Reservations</CardTitle></CardHeader><CardContent><div className="text-2xl font-bold">{reservationRecords.length}</div></CardContent></Card>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
                   <div className="relative sm:col-span-2 lg:col-span-3">
@@ -346,10 +537,10 @@ const Books = () => {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={book.status !== "available" || !!ReservationsService.byBook(book.id).find(r => r.studentId === (user?.id ?? ''))}
+                              disabled={book.status !== "available"}
                               onClick={() => reserve(book)}
                             >
-                              {ReservationsService.byBook(book.id).find(r => r.studentId === (user?.id ?? '')) ? 'Reserved' : 'Reserve'}
+                              {recentlyReserved[book.id] ? 'Reserved' : 'Reserve'}
                             </Button>
                           )}
                         </TableCell>
@@ -405,10 +596,10 @@ const Books = () => {
                               <Button
                                 variant="outline"
                                 size="sm"
-                                disabled={b.status!=='available' || !!ReservationsService.byBook(b.id).find(r => r.studentId === (user?.id ?? ''))}
+                                disabled={b.status!=='available'}
                                 onClick={()=>reserve(b)}
                               >
-                                {ReservationsService.byBook(b.id).find(r => r.studentId === (user?.id ?? '')) ? 'Reserved' : 'Reserve'}
+                                {recentlyReserved[b.id] ? 'Reserved' : 'Reserve'}
                               </Button>
                             )}
                           </div>
@@ -536,11 +727,11 @@ const Books = () => {
       <Dialog open={statsModal === 'borrowed'} onOpenChange={(open) => !open && setStatsModal(null)}>
         <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Borrowed Books ({BorrowService.list().length})</DialogTitle>
+            <DialogTitle>Borrowed Books ({borrowedRecords.length})</DialogTitle>
             <DialogDescription>Books currently borrowed by students</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            {BorrowService.list().length === 0 ? (
+            {borrowedRecords.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground text-lg">No data yet</p>
                 <p className="text-sm text-muted-foreground mt-2">No books have been borrowed yet</p>
@@ -550,20 +741,24 @@ const Books = () => {
                 <TableHeader>
                   <TableRow>
                     <TableHead>Book Title</TableHead>
-                    <TableHead>Student ID</TableHead>
+                    <TableHead>{userType === 'admin' ? 'Student ID' : 'User ID'}</TableHead>
                     <TableHead>Borrow Date</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {BorrowService.list().map((record) => (
-                    <TableRow key={record.id}>
+                  {borrowedRecords.map((record) => (
+                    <TableRow key={record.borrowId}>
                       <TableCell className="font-medium">{record.bookTitle}</TableCell>
-                      <TableCell className="font-mono text-xs">{record.studentId}</TableCell>
-                      <TableCell>{record.borrowDate}</TableCell>
+                      <TableCell className="font-mono text-xs">{record.userId}</TableCell>
+                      <TableCell>{record.borrowedAt}</TableCell>
                       <TableCell>{record.dueDate}</TableCell>
-                      <TableCell><Badge className={record.status === 'overdue' ? 'bg-destructive' : 'bg-primary'}>{record.status}</Badge></TableCell>
+                      <TableCell>
+                        <Badge className={record.status === 'overdue' ? 'bg-destructive' : 'bg-primary'}>
+                          {record.status}
+                        </Badge>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -574,13 +769,13 @@ const Books = () => {
       </Dialog>
 
       <Dialog open={statsModal === 'reservations'} onOpenChange={(open) => !open && setStatsModal(null)}>
-        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-height-[80vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Book Reservations ({ReservationsService.list().length})</DialogTitle>
+            <DialogTitle>Book Reservations ({reservationRecords.length})</DialogTitle>
             <DialogDescription>Books reserved by students</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
-            {ReservationsService.list().length === 0 ? (
+                    {reservationRecords.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-muted-foreground text-lg">No data yet</p>
                 <p className="text-sm text-muted-foreground mt-2">No reservations have been made yet</p>
@@ -589,24 +784,107 @@ const Books = () => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Book Title</TableHead>
-                    <TableHead>Student</TableHead>
-                    <TableHead>Reserved Date</TableHead>
-                    <TableHead>Status</TableHead>
+                  <TableHead>Book Title</TableHead>
+                  <TableHead>{userType === 'admin' ? 'Student' : 'User'}</TableHead>
+                  <TableHead>Reserved Date</TableHead>
+                  <TableHead>Copies</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {ReservationsService.list().map((reservation) => (
-                    <TableRow key={reservation.id}>
+                  {reservationRecords.map((reservation) => (
+                    <TableRow key={reservation.reservationId}>
                       <TableCell className="font-medium">{reservation.bookTitle}</TableCell>
-                      <TableCell>{reservation.studentName} ({reservation.studentId})</TableCell>
-                      <TableCell>{reservation.createdAt}</TableCell>
+                      <TableCell>{reservation.userId}</TableCell>
+                      <TableCell>{reservation.reservedAt}</TableCell>
+                      <TableCell>{reservation.quantity ?? 1}</TableCell>
                       <TableCell><Badge variant="outline">Reserved</Badge></TableCell>
+                      <TableCell>
+                        {userType === 'student' && reservation.userId === (user?.id ?? '') ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={async () => {
+                              try {
+                                // Cancel locally from ReservationsService since
+                                // these records are currently stored in
+                                // localStorage for the /books page.
+                                ReservationsService.remove(reservation.reservationId);
+                                setReservationRecords(prev => prev.filter(r => r.reservationId !== reservation.reservationId));
+                                toast({
+                                  title: 'Reservation cancelled',
+                                  description: `${reservation.bookTitle} reservation has been cancelled.`,
+                                });
+                              } catch (err: any) {
+                                toast({
+                                  title: 'Cancel failed',
+                                  description: err?.message || 'Unable to cancel reservation.',
+                                  variant: 'destructive',
+                                });
+                              }
+                            }}
+                          >
+                            Cancel
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
               </Table>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reserve quantity overlay */}
+      <Dialog open={reserveDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setReserveDialogOpen(false);
+          setReserveTargetBook(null);
+        }
+      }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>How many copies would you like to reserve?</DialogTitle>
+            <DialogDescription>
+              {reserveTargetBook ? `${reserveTargetBook.title} by ${reserveTargetBook.author}` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label className="text-sm font-medium">
+              Quantity
+              <Input
+                type="number"
+                min={1}
+                value={Number.isNaN(reserveQuantity) ? '' : reserveQuantity}
+                onChange={(e) => {
+                  const v = parseInt(e.target.value, 10);
+                  setReserveQuantity(Number.isNaN(v) ? 1 : Math.max(1, v));
+                }}
+                className="mt-1 w-24"
+              />
+            </label>
+          </div>
+          <div className="flex gap-2 justify-end pt-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setReserveDialogOpen(false);
+                setReserveTargetBook(null);
+              }}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmReserve}
+              disabled={isSubmittingReserve}
+            >
+              {isSubmittingReserve ? 'Reserving...' : 'Confirm'}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

@@ -143,27 +143,18 @@ export function LibrarySessionProvider({ children }: { children: ReactNode }) {
 
     try {
       let ok = false;
-      let res: Response | null = null;
       try {
-        res = await fetch(`${API_BASE}/api/library/logout`, {
+        // Always delegate to force-logout so the DB-backed active_sessions
+        // table and library_sessions table are reliably updated, and the
+        // ActiveSessionsPanel on the mirror page stops showing the user
+        // after logout and page refresh.
+        const res = await fetch(`${API_BASE}/api/library/force-logout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId: session.sessionId, userId: session.userId })
+          body: JSON.stringify({ userId: session.userId })
         });
         ok = res.ok || res.status === 404; // treat 404 (no active session) as success
       } catch {}
-
-      // Fallback to force-logout if primary route failed
-      if (!ok) {
-        try {
-          const r2 = await fetch(`${API_BASE}/api/library/force-logout`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: session.userId })
-          });
-          ok = r2.ok || r2.status === 404; // also treat 404 as success
-        } catch {}
-      }
 
       if (!ok) {
         throw new Error('Failed to end library session');

@@ -17,6 +17,12 @@ import { WelcomeMessage, useWelcomeMessage } from "@/components/auth/WelcomeMess
 interface QRCodeLoginProps {
   onBackToManual: () => void;
   onLoginSuccess: () => void;
+  /**
+   * Optional hook provided by LibraryEntry to start the shared
+   * logout flow (checkUserStatus → borrow/return prompt → scanner → endSession).
+   * If present, QR logout will delegate to this instead of calling endSession directly.
+   */
+  onBeginLogoutFlow?: () => Promise<void>;
 }
 
 interface QRLoginData {
@@ -35,7 +41,7 @@ interface QRLoginData {
   twoFactorKey?: string;
 }
 
-export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps) {
+export function QRCodeLogin({ onBackToManual, onLoginSuccess, onBeginLogoutFlow }: QRCodeLoginProps) {
   const { signInWithQR, verifyTotp } = useAuth();
   const { session, createSession, checkUserStatus, checkUserSessionStatus, endSession, forceLogoutUser } = useLibrarySession();
   const { toast } = useToast();
@@ -74,39 +80,52 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps
     }
   }, [session, checkUserSessionStatus]);
 
-  // Handle logout via QR scan
+  // Handle logout via QR scan – delegate to shared LibraryEntry logout flow when available
   const handleQRLogout = useCallback(async (loginData: QRLoginData) => {
-    console.log('🚪 ========= QR LOGOUT ========');
+    console.log('🚪 ========= QR LOGOUT (via QR code) ========');
     console.log('User:', loginData.userId);
-    
+
     setIsLoggingIn(true);
-    
+
     try {
-      // Get user info before ending session
+      // If LibraryEntry provided a unified logout flow, use that so the
+      // borrow/return prompts and Book Scanner run before ending the session.
+      if (onBeginLogoutFlow && session && session.userId === loginData.userId) {
+        console.log('🔁 Delegating QR logout to shared LibraryEntry logout flow');
+        await onBeginLogoutFlow();
+        // Local state cleanup for the scanner UI
+        setScannedData(null);
+        setScannedUserId(null);
+        setIsUserLoggedInLibrary(false);
+        console.log('✅ QR logout via shared flow completed');
+        return;
+      }
+
+      // Fallback: if no shared flow is provided (or this QR refers to a different user),
+      // perform a direct backend logout.
       const firstName = loginData.fullName.split(' ')[0] || 'User';
-      
+
       if (session && session.userId === loginData.userId) {
         await endSession();
       } else {
         const ok = await forceLogoutUser(loginData.userId);
         if (!ok) throw new Error('Failed to end session');
       }
-      
-      // Show logout message
+
+      // Show logout message (legacy behaviour for non-current users)
       showWelcome(firstName, loginData.userType, 'logout');
-      
+
       toast({
         title: "Logged Out",
         description: `${loginData.fullName} has been logged out from the library.`,
       });
-      
+
       // Reset state
       setScannedData(null);
       setScannedUserId(null);
       setIsUserLoggedInLibrary(false);
-      
-      console.log('✅ ========= QR LOGOUT COMPLETED ========');
-      
+
+      console.log('✅ ========= QR LOGOUT COMPLETED (fallback path) ========');
     } catch (error: any) {
       console.error('❌ Logout failed:', error);
       toast({
@@ -117,7 +136,7 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps
     } finally {
       setIsLoggingIn(false);
     }
-  }, [endSession, showWelcome, toast]);
+  }, [session, onBeginLogoutFlow, endSession, forceLogoutUser, showWelcome, toast]);
 
   // FORCE AUTO-LOGIN with comprehensive debugging (defined before handlers to avoid TDZ)
   const proceedWithAutoLogin = useCallback(async (loginData: QRLoginData) => {
@@ -240,7 +259,7 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps
     
     try {
       // Try to parse the QR data first
-      let parsedData;
+      let parsedData: any;
       try {
         parsedData = JSON.parse(qrData);
         console.log('📋 QR Code parsed successfully:', {
@@ -254,6 +273,28 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess }: QRCodeLoginProps
       } catch (parseError) {
         console.error('❌ QR Code parsing failed:', parseError);
         setScanError("Invalid QR Code format");
+        return;
+      }
+      
+      // Detect book-management QR payloads and treat them as a separate, non-error path.
+      // Book QR codes typically look like: { t: 'BOOK', id: '<bookId>', title, author, ... }
+      const looksLikeBookQr =
+        (parsedData && (parsedData.t === 'BOOK' || parsedData.type === 'BOOK')) ||
+        (parsedData && !parsedData.userId && (parsedData.bookId || parsedData.id));
+
+      if (looksLikeBookQr) {
+        console.log('📚 Detected BOOK QR payload in QRCodeLogin:', parsedData);
+        const bookId = parsedData.bookId || parsedData.id || 'Unknown';
+
+        // Clear any previous error and show a neutral/success message instead of a red "Invalid QR" state.
+        setScanError(null);
+        toast({
+          title: 'Book QR Detected',
+          description: `QRCODE BOOK SUCCESSFULL SCAN (Book ID: ${bookId}). Please continue in the Library Dashboard to borrow or return this book.`,
+          variant: 'default'
+        });
+
+        // We stop here so the login validator is not run on book QR codes.
         return;
       }
       

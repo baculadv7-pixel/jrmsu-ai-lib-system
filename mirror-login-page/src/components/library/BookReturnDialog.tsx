@@ -51,10 +51,10 @@ export function BookReturnDialog({
           </div>
 
           <p className="text-base font-semibold text-center mb-2">
-            Do you want to return {bookCount === 1 ? 'this book' : 'these books'}?
+            You have borrowed {bookCount === 1 ? 'a book' : 'books'}. Would you like to scan it to return?
           </p>
           <p className="text-sm text-muted-foreground text-center">
-            If yes, we'll scan the QR code to process the return.
+            If you choose Yes, we will open the book scanner and you must scan the QR code on the borrowed book to return it.
           </p>
         </div>
 

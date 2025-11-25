@@ -9,8 +9,13 @@ import json
 import os
 from typing import Dict, List, Optional
 
+import requests
+
 # Create Blueprint
 mirror_api = Blueprint('mirror_api', __name__, url_prefix='/api')
+
+# Base URL for central JRMSU library backend (same app.py that registers /api/library/*)
+CENTRAL_BACKEND_BASE = os.getenv('BACKEND_BASE_URL', 'http://localhost:5000')
 
 # In-memory storage for library sessions (use database in production)
 LIBRARY_SESSIONS = {}  # user_id -> session_data
@@ -149,34 +154,65 @@ def get_reserved_books(user_id):
 
 @mirror_api.route('/books/borrow', methods=['POST'])
 def borrow_book():
-    """Process book borrowing with QR scan"""
+    """Process book borrowing with QR scan.
+
+    This now delegates the actual borrow operation to the central backend
+    /api/library/borrow-book endpoint so that borrow_records and book
+    availability are kept in sync for the main app (8080).
+    """
     try:
         data = request.get_json()
         user_id = data.get('userId')
         book_id = data.get('bookId')
         borrow_location = data.get('borrowLocation', 'inside')  # 'inside' or 'outside'
         is_mirror_borrow = data.get('isMirrorBorrow', True)
+        session_id = data.get('sessionId', '')
         
         if not user_id or not book_id:
             return jsonify({'error': 'Missing required fields'}), 400
         
-        # Get user and book info
+        # Get user and book info (for notifications / UX only)
         user = get_user_info(user_id)
         book = get_book_info(book_id)
         
         if not user or not book:
             return jsonify({'error': 'User or book not found'}), 404
         
-        # Calculate due date using borrowing rules
+        # Call central backend to create borrow_records row and update books table
+        try:
+            resp = requests.post(
+                f"{CENTRAL_BACKEND_BASE}/api/library/borrow-book",
+                json={
+                    'userId': user_id,
+                    'bookId': book_id,
+                    'sessionId': session_id,
+                },
+                timeout=5,
+            )
+        except Exception as e:
+            return jsonify({'error': f'Failed to contact central backend: {e}'}), 502
+        
+        if resp.status_code != 200:
+            try:
+                payload = resp.json()
+                msg = payload.get('error') or payload.get('message') or resp.text
+            except Exception:
+                msg = resp.text
+            return jsonify({'error': f'Central backend rejected borrow: {msg}'}), resp.status_code
+        
+        payload = resp.json() or {}
+        borrow_id = payload.get('borrowId') or f"BR-{int(datetime.now().timestamp())}"
+        
+        # Calculate due date using borrowing rules (for mirror UI display only)
         from borrowingRules import BorrowingRulesService
         borrowing = BorrowingRulesService.calculateDueDate(
             datetime.now(),
             borrow_location
         )
         
-        # Create borrow record
+        # Mirror-local record (for mirror dashboard/overlays)
         borrow_record = {
-            'borrowId': f"BR-{int(datetime.now().timestamp())}",
+            'borrowId': borrow_id,
             'userId': user_id,
             'userName': user['fullName'],
             'bookId': book_id,
@@ -186,76 +222,97 @@ def borrow_book():
             'dueDateString': borrowing['dueDateString'],
             'location': borrow_location,
             'status': 'active',
-            'isMirrorBorrow': is_mirror_borrow
+            'isMirrorBorrow': is_mirror_borrow,
         }
-        
-        # Save borrow record
         if user_id not in BORROWED_BOOKS:
             BORROWED_BOOKS[user_id] = []
         BORROWED_BOOKS[user_id].append(borrow_record)
         
-        # Remove from reserved if it was reserved
+        # Remove from reserved if it was reserved (mirror-local)
         if user_id in RESERVED_BOOKS and book_id in RESERVED_BOOKS[user_id]:
             RESERVED_BOOKS[user_id].remove(book_id)
         
-        # Notify all admins
+        # Notify all admins (mirror-level notification)
         notify_all_admins(
             f"📖 {'🏛️' if borrow_location == 'inside' else '🏠'} Book borrowed: \"{book['title']}\" ({book_id}) by {user['fullName']} ({user_id}). Due: {borrowing['dueDateString']}",
-            'borrow'
+            'borrow',
         )
         
         # Notify user
         notify_user(
             user_id,
             f"You have successfully borrowed \"{book['title']}\". Due date: {borrowing['dueDateString']}",
-            'borrow'
+            'borrow',
         )
         
         return jsonify({
             'success': True,
-            'borrowId': borrow_record['borrowId'],
+            'borrowId': borrow_id,
             'bookTitle': book['title'],
             'dueDate': borrowing['dueDateString'],
-            'location': borrow_location
+            'location': borrow_location,
         })
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 @mirror_api.route('/books/activate-return-time', methods=['POST'])
 def activate_return_time():
-    """Activate return time tracking when user scans book at logout"""
+    """Activate return time tracking when user scans book at logout.
+
+    This now also calls the central backend /api/library/activate-return-time
+    so that the DB borrow_records row is updated consistently.
+    """
     try:
         data = request.get_json()
         user_id = data.get('userId')
-        book_id = data.get('bookId')
+        book_id = data.get('BookId') or data.get('bookId')
+        session_id = data.get('sessionId', '')
         
         if not user_id or not book_id:
             return jsonify({'error': 'Missing required fields'}), 400
         
-        # Find the borrow record
+        # Update mirror-local record for overlays
         if user_id in BORROWED_BOOKS:
             for record in BORROWED_BOOKS[user_id]:
                 if record['bookId'] == book_id and record['status'] == 'active':
                     record['returnTimeActivated'] = True
                     record['activatedAt'] = get_current_time()
-                    
-                    user = get_user_info(user_id)
-                    book = get_book_info(book_id)
-                    
-                    # Notify admins
-                    notify_all_admins(
-                        f"⏰ Return time activated: \"{book['title']}\" ({book_id}) - {user['fullName']} ({user_id})",
-                        'system'
-                    )
-                    
-                    return jsonify({
-                        'success': True,
-                        'message': 'Return time activated successfully'
-                    })
+                    break
         
-        return jsonify({'error': 'Active borrow record not found'}), 404
+        # Call central backend to flag return_time_activated on borrow_records
+        try:
+            resp = requests.post(
+                f"{CENTRAL_BACKEND_BASE}/api/library/activate-return-time",
+                json={
+                    'userId': user_id,
+                    'bookId': book_id,
+                    'sessionId': session_id,
+                },
+                timeout=5,
+            )
+        except Exception as e:
+            return jsonify({'error': f'Failed to contact central backend: {e}'}), 502
         
+        if resp.status_code not in (200, 204):
+            try:
+                payload = resp.json()
+                msg = payload.get('error') or payload.get('message') or resp.text
+            except Exception:
+                msg = resp.text
+            return jsonify({'error': f'Central backend activate-return-time failed: {msg}'}), resp.status_code
+        
+        # Mirror-level notifications
+        user = get_user_info(user_id)
+        book = get_book_info(book_id)
+        notify_all_admins(
+            f"⏰ Return time activated: \"{book['title']}\" ({book_id}) - {user['fullName']} ({user_id})",
+            'system',
+        )
+        
+        return jsonify({
+            'success': True,
+            'message': 'Return time activated successfully',
+        })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -281,80 +338,105 @@ def get_borrowed_books(user_id):
 
 @mirror_api.route('/books/return', methods=['POST'])
 def return_book():
-    """Process book return with QR scan"""
+    """Process book return with QR scan.
+
+    This delegates the actual DB update to /api/library/return-book so that
+    borrow_records and inventory are updated consistently for the main app.
+    """
     try:
         data = request.get_json()
         user_id = data.get('userId')
-        book_id = data.get('bookId')
+        book_id = data.get('BookId') or data.get('bookId')
         return_location = data.get('returnLocation', 'inside')
+        session_id = data.get('sessionId', '')
         
         if not user_id or not book_id:
             return jsonify({'error': 'Missing required fields'}), 400
         
-        # Get user and book info
+        # Get user and book info (for notifications / UX)
         user = get_user_info(user_id)
         book = get_book_info(book_id)
         
         if not user or not book:
             return jsonify({'error': 'User or book not found'}), 404
         
-        # Find the borrow record
-        if user_id not in BORROWED_BOOKS:
-            return jsonify({'error': 'No borrow records found'}), 404
+        # Call central backend to mark DB borrow record as returned and restore availability
+        try:
+            resp = requests.post(
+                f"{CENTRAL_BACKEND_BASE}/api/library/return-book",
+                json={
+                    'userId': user_id,
+                    'bookId': book_id,
+                    'sessionId': session_id,
+                },
+                timeout=5,
+            )
+        except Exception as e:
+            return jsonify({'error': f'Failed to contact central backend: {e}'}), 502
         
-        borrow_record = None
-        for record in BORROWED_BOOKS[user_id]:
-            if record['bookId'] == book_id and record['status'] == 'active':
-                borrow_record = record
-                break
+        if resp.status_code != 200:
+            try:
+                payload = resp.json()
+                msg = payload.get('error') or payload.get('message') or resp.text
+            except Exception:
+                msg = resp.text
+            return jsonify({'error': f'Central backend rejected return: {msg}'}), resp.status_code
         
-        if not borrow_record:
-            return jsonify({'error': 'Active borrow record not found'}), 404
+        # Mirror-local BORROWED_BOOKS update so overlays reflect state
+        if user_id in BORROWED_BOOKS:
+            for record in BORROWED_BOOKS[user_id]:
+                if record['bookId'] == book_id and record.get('status') == 'active':
+                    from borrowingRules import BorrowingRulesService
+                    # Use existing dueDate if present, otherwise now
+                    try:
+                        due_date = datetime.fromisoformat(record.get('dueDate')) if record.get('dueDate') else datetime.now()
+                    except Exception:
+                        due_date = datetime.now()
+                    return_date = datetime.now()
+                    overdue_check = BorrowingRulesService.checkOverdue(due_date, return_date)
+                    on_time = not overdue_check['isOverdue']
+                    record['status'] = 'returned'
+                    record['returnDate'] = return_date.isoformat()
+                    record['returnLocation'] = return_location
+                    record['onTime'] = on_time
+                    record['daysOverdue'] = overdue_check['businessDaysOverdue'] - 7 if overdue_check['isOverdue'] else 0
+                    if overdue_check['isOverdue']:
+                        record['fine'] = BorrowingRulesService.calculateFine(overdue_check)
+                    break
         
-        # Check if returned on time
-        from borrowingRules import BorrowingRulesService
-        due_date = datetime.fromisoformat(borrow_record['dueDate'])
-        return_date = datetime.now()
+        # Prepare notification text based on mirror-local overdue computation (if any)
+        status_icon = '✅'
+        status_text = 'on time'
+        days_overdue = 0
+        fine = 0
+        if user_id in BORROWED_BOOKS:
+            for record in BORROWED_BOOKS[user_id]:
+                if record['bookId'] == book_id and record.get('status') == 'returned':
+                    days_overdue = record.get('daysOverdue', 0)
+                    fine = record.get('fine', 0)
+                    if days_overdue > 0:
+                        status_icon = '⚠️'
+                        status_text = f"late ({days_overdue} business days)"
+                    break
         
-        overdue_check = BorrowingRulesService.checkOverdue(due_date, return_date)
-        on_time = not overdue_check['isOverdue']
-        
-        # Update borrow record
-        borrow_record['status'] = 'returned'
-        borrow_record['returnDate'] = return_date.isoformat()
-        borrow_record['returnLocation'] = return_location
-        borrow_record['onTime'] = on_time
-        borrow_record['daysOverdue'] = overdue_check['businessDaysOverdue'] - 7 if overdue_check['isOverdue'] else 0
-        
-        # Calculate fine if overdue
-        if overdue_check['isOverdue']:
-            fine = BorrowingRulesService.calculateFine(overdue_check)
-            borrow_record['fine'] = fine
-        
-        # Notify all admins
-        status_icon = '✅' if on_time else '⚠️'
-        status_text = 'on time' if on_time else f"late ({borrow_record['daysOverdue']} business days)"
-        
+        # Notify admins and user
         notify_all_admins(
             f"📗 {status_icon} Book returned {status_text}: \"{book['title']}\" ({book_id}) by {user['fullName']} ({user_id})",
-            'return'
+            'return',
         )
-        
-        # Notify user
         notify_user(
             user_id,
             f"You have successfully returned \"{book['title']}\". {status_text.capitalize()}.",
-            'return'
+            'return',
         )
         
         return jsonify({
             'success': True,
             'bookTitle': book['title'],
-            'onTime': on_time,
-            'daysOverdue': borrow_record.get('daysOverdue', 0),
-            'fine': borrow_record.get('fine', 0)
+            'onTime': status_text == 'on time',
+            'daysOverdue': days_overdue,
+            'fine': fine,
         })
-        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

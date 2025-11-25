@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Eye, EyeOff, QrCode } from "lucide-react";
+import { Eye, EyeOff, QrCode, CheckCircle } from "lucide-react";
 import { io } from "socket.io-client";
 import logo from "@/assets/jrmsu-logo.jpg";
 import { useAuth } from "@/context/AuthContext";
@@ -21,7 +21,8 @@ import {
   BookPickupDialog, 
   BookReturnDialog, 
   BookScannerDialog,
-  LogoutBookScan 
+  LogoutBookScan,
+  BorrowReturnPromptDialog,
 } from "@/components/library";
 
 import { ActiveSessionsPanel } from "@/components/sessions/ActiveSessionsPanel";
@@ -63,6 +64,9 @@ const Login = () => {
   const [userReservations, setUserReservations] = useState<any[]>([]);
   const [userBorrowedBooks, setUserBorrowedBooks] = useState<any[]>([]);
   const [currentBookToScan, setCurrentBookToScan] = useState<string | null>(null);
+  const [logoutAfterScan, setLogoutAfterScan] = useState(false);
+  const [showBorrowPrompt, setShowBorrowPrompt] = useState(false);
+  const [showReturnPrompt, setShowReturnPrompt] = useState(false);
 
   // Listen for backend session cleanup (restart/shutdown) and show overlay
   useEffect(() => {
@@ -84,6 +88,14 @@ const Login = () => {
       }
     } catch {}
   }, []);
+
+  // When the shared library session context becomes null (any logout source),
+  // ensure our local "isUserLoggedInLibrary" flag is also cleared so the banner disappears.
+  useEffect(() => {
+    if (!session) {
+      setIsUserLoggedInLibrary(false);
+    }
+  }, [session]);
 
   // Check if the SPECIFIC typed user ID has an active library session
   useEffect(() => {
@@ -236,6 +248,11 @@ const Login = () => {
       description: "You can scan the book when you pick it up during logout.",
       variant: "default"
     });
+    // If this dialog was shown as part of logout flow, continue logout without borrowing
+    if (logoutAfterScan) {
+      setLogoutAfterScan(false);
+      void handleLogoutComplete();
+    }
   };
 
   const handleBookReturnYes = () => {
@@ -251,27 +268,48 @@ const Login = () => {
       description: "You can return the book later.",
       variant: "default"
     });
+    // If this dialog was shown as part of logout flow, continue logout without returning
+    if (logoutAfterScan) {
+      setLogoutAfterScan(false);
+      void handleLogoutComplete();
+    }
   };
+
+  const [lastScannedBookId, setLastScannedBookId] = useState<string | null>(null);
+  const [showBorrowSuccessOverlay, setShowBorrowSuccessOverlay] = useState(false);
+  const [showReturnSuccessOverlay, setShowReturnSuccessOverlay] = useState(false);
 
   const handleBookScanned = async (bookId: string) => {
     try {
+      setLastScannedBookId(bookId);
+
       if (scannerMode === 'borrow') {
         await borrowBook(bookId);
+        // Second-stage overlay: show full-screen success card after backend confirms borrow
+        setShowBorrowSuccessOverlay(true);
         toast({
-          title: "Success",
-          description: "Book borrowed successfully! Admins have been notified.",
+          title: "Book Borrowed",
+          description: "BOOK SUCCESSFUL BORROWED. Admins have been notified.",
           variant: "default"
         });
       } else {
         await returnBook(bookId);
+        setShowReturnSuccessOverlay(true);
         toast({
-          title: "Success",
-          description: "Book returned successfully! Admins have been notified.",
+          title: "Book Returned",
+          description: "BOOK SUCCESSFUL RETURN. Admins have been notified.",
           variant: "default"
         });
       }
+
       setShowBookScanner(false);
       setCurrentBookToScan(null);
+
+      // If this scan was initiated from a logout flow, complete logout after successful borrow/return
+      if (logoutAfterScan) {
+        setLogoutAfterScan(false);
+        void handleLogoutComplete();
+      }
     } catch (error: any) {
       toast({
         title: "Error",
@@ -295,7 +333,8 @@ const Login = () => {
       setShowLogoutScan(false);
       // Clear form and reset state
       setFormData({ id: "", password: "", totp: "" });
-      // Note: isUserLoggedInLibrary will be automatically updated by useEffect when session changes
+      // Explicitly mark that the user no longer has an active library session on this client
+      setIsUserLoggedInLibrary(false);
     } catch (error: any) {
       toast({
         title: "Error",
@@ -307,12 +346,57 @@ const Login = () => {
 
   const handleLibraryLogout = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // Check if user has borrowed books that need scanning
-    if (session && session.hasBorrowedBooks && session.borrowedBooks && session.borrowedBooks.length > 0) {
-      setShowLogoutScan(true);
-    } else {
-      // Direct logout if no borrowed books
+
+    // Use the best available userId for status checks: prefer active
+    // library session, then authenticated user, then typed ID.
+    const activeUserId = session?.userId || user?.id || formData.id;
+    if (!activeUserId) {
+      // Nothing to check; just complete logout locally.
+      await handleLogoutComplete();
+      return;
+    }
+
+    try {
+      // Refresh user status from backend to see latest reservations/borrows
+      const status = await checkUserStatus(activeUserId);
+      setUserReservations(status.reservedBooks || []);
+      setUserBorrowedBooks(status.borrowedBooks || []);
+
+      console.log('📊 Library logout status check:', {
+        userId: activeUserId,
+        hasReservations: status.hasReservations,
+        reservedCount: status.reservedBooks?.length ?? 0,
+        hasBorrowedBooks: status.hasBorrowedBooks,
+        borrowedCount: status.borrowedBooks?.length ?? 0,
+      });
+
+      // If user has reserved books, ask to scan to borrow before logout.
+      // Be defensive: rely on the actual reservedBooks list, not just the flag.
+      if ((status.hasReservations || (status.reservedBooks?.length ?? 0) > 0) &&
+          (status.reservedBooks?.length ?? 0) > 0) {
+        setLogoutAfterScan(true);
+        setShowBorrowPrompt(true);
+        return;
+      }
+
+      // If user has borrowed books, ask to scan to return before logout.
+      if ((status.hasBorrowedBooks || (status.borrowedBooks?.length ?? 0) > 0) &&
+          (status.borrowedBooks?.length ?? 0) > 0) {
+        setLogoutAfterScan(true);
+        setShowReturnPrompt(true);
+        return;
+      }
+
+      // No reserved or borrowed books: direct logout
+      await handleLogoutComplete();
+    } catch (error: any) {
+      console.error('❌ Library logout status check failed:', error);
+      toast({
+        title: "Error",
+        description: error?.message || "Failed to check library status before logout.",
+        variant: "destructive",
+      });
+      // Fallback: still attempt logout so user is not stuck
       await handleLogoutComplete();
     }
   };
@@ -322,7 +406,15 @@ const Login = () => {
       <div className="grid grid-cols-12 gap-4">
         {/* Left: Active Sessions */}
         <div className="col-span-12 lg:col-span-4 order-2 lg:order-1">
-          <ActiveSessionsPanel />
+          <ActiveSessionsPanel 
+            currentUserId={session?.userId || user?.id || null}
+            onLogoutCurrentUser={async () => {
+              // Reuse the same logout flow as the green "Logout from Library" button,
+              // so borrow/return overlays can run before ending the session.
+              const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+              await handleLibraryLogout(fakeEvent);
+            }}
+          />
         </div>
         {/* Right: Existing login content */}
         <div className="col-span-12 lg:col-span-8 order-1 lg:order-2">
@@ -450,7 +542,7 @@ const Login = () => {
               </div>
 
               {/* Debug: Show current session status */}
-              {session && session.status === 'active' && (
+              {session && session.status === 'active' && isUserLoggedInLibrary && (
                 <div className="text-xs text-center p-2 bg-green-50 border border-green-200 rounded-md">
                   <span className="text-green-700 font-medium">
                     ✓ Library Session Active: {session.userId}
@@ -485,6 +577,11 @@ const Login = () => {
               onLoginSuccess={() => {
                 // Redirect handled by QRCodeLogin after welcome message
                 navigate("/dashboard");
+              }}
+              onBeginLogoutFlow={async () => {
+                // Reuse the same logout flow used by the manual "Logout from Library" button.
+                const fakeEvent = { preventDefault: () => {} } as React.FormEvent;
+                await handleLibraryLogout(fakeEvent);
               }}
             />
           )}
@@ -592,7 +689,7 @@ const Login = () => {
         />
       )}
 
-      {/* Library-specific dialogs */}
+      {/* Entry-time library dialogs for when user first logs in */}
       <BookPickupDialog
         open={showBookPickup}
         onOpenChange={setShowBookPickup}
@@ -611,6 +708,47 @@ const Login = () => {
         onNo={handleBookReturnNo}
       />
 
+      {/* Logout-time borrow/return prompts that lead into the Book Scanner */}
+      <BorrowReturnPromptDialog
+        open={showBorrowPrompt}
+        mode="borrow"
+        userName={user?.fullName || user?.firstName || "User"}
+        reservedCount={userReservations.length}
+        borrowedCount={userBorrowedBooks.length}
+        onConfirm={() => {
+          setShowBorrowPrompt(false);
+          setScannerMode('borrow');
+          setShowBookScanner(true);
+        }}
+        onCancel={() => {
+          setShowBorrowPrompt(false);
+          if (logoutAfterScan) {
+            setLogoutAfterScan(false);
+            void handleLogoutComplete();
+          }
+        }}
+      />
+
+      <BorrowReturnPromptDialog
+        open={showReturnPrompt}
+        mode="return"
+        userName={user?.fullName || user?.firstName || "User"}
+        reservedCount={userReservations.length}
+        borrowedCount={userBorrowedBooks.length}
+        onConfirm={() => {
+          setShowReturnPrompt(false);
+          setScannerMode('return');
+          setShowBookScanner(true);
+        }}
+        onCancel={() => {
+          setShowReturnPrompt(false);
+          if (logoutAfterScan) {
+            setLogoutAfterScan(false);
+            void handleLogoutComplete();
+          }
+        }}
+      />
+
       <BookScannerDialog
         open={showBookScanner}
         onOpenChange={setShowBookScanner}
@@ -625,6 +763,59 @@ const Login = () => {
         borrowedBooks={userBorrowedBooks}
         onComplete={handleLogoutComplete}
       />
+
+      {/* Second-stage overlay cards for successful borrow/return after QR detection */}
+      <Dialog open={showBorrowSuccessOverlay} onOpenChange={setShowBorrowSuccessOverlay}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center">SUCCESSFULLY BORROW</DialogTitle>
+            <DialogDescription className="text-center">
+              BOOK SUCCESSFUL BORROWED {lastScannedBookId ? `(Book ID: ${lastScannedBookId})` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center space-y-4 py-4">
+            <div className="relative h-20 w-20">
+              {/* Spinning ring */}
+              <div className="absolute inset-0 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
+              {/* Solid circle with check */}
+              <div className="absolute inset-3 rounded-full bg-primary flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-white" />
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground text-center">
+              You may proceed to use the book. This action has been recorded in the library system.
+            </p>
+            <Button onClick={() => setShowBorrowSuccessOverlay(false)} className="w-full">
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showReturnSuccessOverlay} onOpenChange={setShowReturnSuccessOverlay}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="text-center">SUCCESSFULLY RETURN</DialogTitle>
+            <DialogDescription className="text-center">
+              BOOK SUCCESSFUL RETURN {lastScannedBookId ? `(Book ID: ${lastScannedBookId})` : ''}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex flex-col items-center justify-center space-y-4 py-4">
+            <div className="relative h-20 w-20">
+              <div className="absolute inset-0 rounded-full border-4 border-emerald-300 border-t-emerald-600 animate-spin" />
+              <div className="absolute inset-3 rounded-full bg-emerald-500 flex items-center justify-center">
+                <CheckCircle className="h-8 w-8 text-white" />
+              </div>
+            </div>
+            <p className="text-sm text-muted-foreground text-center">
+              The book has been returned and marked available in the inventory.
+            </p>
+            <Button onClick={() => setShowReturnSuccessOverlay(false)} className="w-full">
+              Close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
         </div>
       </div>
