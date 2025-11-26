@@ -650,6 +650,155 @@ This section maps specific features to code files and (conceptual) line ranges.
 
 ---
 
+## Environment Setup & Dependencies (Install Guide)
+
+This section summarizes **everything that must be installed** to run the system end-to-end. The commands use Windows PowerShell syntax.
+
+### 1. Global Tools & Languages
+
+1. **Git** – for version control (optional but recommended).
+2. **Node.js (LTS, e.g. 18+)** – required for both React frontends.
+3. **Python 3.10+** – required for the main backend, AI server, and QR utilities.
+4. **MySQL / MariaDB** – e.g. via **XAMPP** as documented in `RUN server GUIDE.txt`.
+5. **Ollama** – for running the local LLaMA 3 model used by the AI server.
+
+Make sure `node`, `npm`, `python`, and `pip` are available in your `PATH`.
+
+### 2. Database Setup (MySQL)
+
+1. Install **XAMPP** or a standalone MySQL server.
+2. Create the main database:
+   - Name: `jrmsu_library` (as used by `COMPREHENSIVE_SYSTEM_CHECK.py` and `python-backend/db.py`).
+3. Import or run the SQL schema files:\r
+   - `create_library_tables.sql` (root of the repo) – core tables for books, students, admins, reservations, borrow_records, etc.
+   - Any additional SQL under `jrmsu-wise-library-main/python-backend` (for notifications schema if present).
+4. (Optional) For AI logs, create:
+   - Database: `library_system_ai` – used by `ai_server/app.py` to store `ai_logs`.
+
+Configure connection parameters (host, user, password) in:
+- `jrmsu-wise-library-main/python-backend/db.py` (and/or `.env` in that folder).
+
+### 3. Python Dependencies – Main Backend (`jrmsu-wise-library-main/python-backend`)
+
+From the repo root:
+
+```powershell
+cd "jrmsu-wise-library-main/python-backend"
+python -m venv .venv
+. .venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+If `requirements.txt` is missing or you want to double-check, the backend imports at least the following modules (from `app.py`, `COMPREHENSIVE_SYSTEM_CHECK.py`, and other files):
+
+- `flask`
+- `flask_socketio`
+- `mysql-connector-python` (or `mysql-connector`) – for MySQL access
+- `bcrypt`
+- `pyotp`
+- `requests`
+- `bleach`
+- `Pillow` (PIL)
+- `openpyxl` (optional, for Excel export of audit logs)
+
+So a minimal manual install would be:
+
+```powershell
+pip install flask flask-socketio mysql-connector-python bcrypt pyotp requests bleach Pillow openpyxl
+```
+
+### 4. Python Dependencies – AI Server (`ai_server`)
+
+```powershell
+cd "ai_server"
+python -m venv .venv
+. .venv\Scripts\Activate.ps1
+pip install --upgrade pip
+pip install flask requests mysql-connector-python textblob
+```
+
+- `textblob` is optional but used for sentiment analysis.
+- The AI server also shell-executes `ollama`, so **Ollama must be installed** separately and the `ollama` command must be available.
+- Start Ollama:
+
+```powershell
+ollama serve
+ollama pull llama3:8b-instruct-q4_K_M
+```
+
+The model name must match the one in `ai_server/app.py` and/or environment variables.
+
+### 5. Python Utilities – Root `python-backend` (QR Generator)
+
+The root-level `python-backend/generate_qr_with_logo.py` uses:
+- `qrcode`
+- `Pillow`
+
+Install them in any Python environment where you plan to run it:
+
+```powershell
+pip install qrcode[pil] Pillow
+```
+
+### 6. Node / Frontend Dependencies – Main App (`jrmsu-wise-library-main`)
+
+```powershell
+cd "jrmsu-wise-library-main"
+npm install
+```
+
+This installs all dependencies listed in `jrmsu-wise-library-main/package.json`, including:
+- React, React DOM, React Router DOM
+- TypeScript and Vite
+- Tailwind CSS and shadcn UI (Radix UI components)
+- `@tanstack/react-query`
+- `socket.io-client`
+- QR-related libraries (`html5-qrcode`, `qrcode`, `qrcode.react`, `jsqr`)
+- Testing and linting tools (Vitest, ESLint, Tailwind plugins, etc.)
+
+### 7. Node / Frontend Dependencies – Mirror App (`mirror-login-page`)
+
+```powershell
+cd "mirror-login-page"
+npm install
+```
+
+The `mirror-login-page/package.json` is aligned with the main app and includes the same core stack (React, TS, Vite, Tailwind, shadcn, QR and Socket.IO libs).
+
+### 8. Environment Variables & .env Files
+
+You may configure the following environment variables (or entries in `.env` files) as needed:
+
+- **Backend (`python-backend/app.py`):**
+  - `ALLOWED_ORIGINS` – e.g. `http://localhost:8080,http://127.0.0.1:8080,http://localhost:8081,http://127.0.0.1:8081`
+  - `EMAIL_ENABLED`, `SMTP_SERVER`, `SMTP_PORT`, `SENDER_EMAIL`, `SENDER_PASSWORD`, `SENDER_NAME` – for password reset emails.
+  - `OLLAMA_URL`, `OLLAMA_MODEL` – if the backend also calls AI (defaults are set).
+
+- **AI Server (`ai_server/app.py`):**
+  - `LIBRARY_API_BASE` – base URL of the main backend (default `http://localhost:5000`).
+  - `OLLAMA_HOST` is forced to `127.0.0.1:11434` inside the script.
+
+Adjust `.env` files under:
+- `jrmsu-wise-library-main/` (frontend base URLs, API endpoints if present),
+- `jrmsu-wise-library-main/python-backend/` (DB credentials, allowed origins, email),
+- `ai_server/` (optional AI-specific overrides).
+
+### 9. Quick All-in-One Startup (After Installing Dependencies)
+
+Once all dependencies are installed and the database is configured, you can either start services manually (as in `RUN server GUIDE.txt`) or use the provided PowerShell scripts in the repo root:
+
+- `Start-All-Enforced.ps1` or `run_all_enforced.ps1` – free ports 8080, 8081, 5000, 5002, 11434 then start:
+  - Python backend (`jrmsu-wise-library-main/python-backend/app.py`)
+  - Main frontend (`jrmsu-wise-library-main`, `npm run dev`)
+  - Mirror frontend (`mirror-login-page`, `npm run dev`)
+  - AI server (`ai_server/app.py`)
+  - Ollama (`ollama serve`)
+
+You can also run `COMPREHENSIVE_SYSTEM_CHECK.py` at the repo root to verify database connectivity, API endpoints, ports, and required Python modules.
+
+---
+
 ## How to Run (Overview)
 
 1. **Backend** (Python):

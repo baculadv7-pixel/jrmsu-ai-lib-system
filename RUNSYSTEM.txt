@@ -1,0 +1,167 @@
+JRMSU AI-LIBRARY SYSTEM
+RUNSYSTEM.txt
+========================
+
+This file explains how to RUN all parts of the system on Windows (PowerShell) and how to OPTIONALLY free busy ports.
+
+SERVICES
+--------
+- MAIN FRONTEND (React + TS):    port 8080
+- MIRROR FRONTEND (React + TS):  port 8081
+- PYTHON BACKEND (Flask):        port 5000
+- AI SERVER (Flask):             port 5002
+- OLLAMA AI MODEL SERVER:        port 11434
+
+BEFORE YOU START
+----------------
+Make sure you have already installed:
+- Node.js (LTS), npm
+- Python 3.10+, pip
+- MySQL / MariaDB (XAMPP)
+- Ollama with model: llama3:8b-instruct-q4_K_M
+- All npm/pip dependencies (see ENVIRONMENT.README.md)
+
+--------------------------------------
+OPTION 1 – RUN EVERYTHING MANUALLY (RECOMMENDED FOR DEBUGGING)
+--------------------------------------
+
+Run each of these in its OWN PowerShell terminal so you can see logs separately.
+
+[Terminal 1] – PYTHON BACKEND (Flask API, port 5000)
+---------------------------------------------------
+cd "C:\Users\provu\Desktop\jrmsu-ai-lib-system-main\jrmsu-wise-library-main\python-backend"
+. .venv\Scripts\Activate.ps1
+python app.py
+
+[Terminal 2] – MAIN FRONTEND (React, port 8080)
+-----------------------------------------------
+cd "C:\Users\provu\Desktop\jrmsu-ai-lib-system-main\jrmsu-wise-library-main"
+npm run dev
+
+# Open main system in your browser:
+# http://localhost:8080
+
+[Terminal 3] – MIRROR FRONTEND (React, port 8081)
+-------------------------------------------------
+cd "C:\Users\provu\Desktop\jrmsu-ai-lib-system-main\mirror-login-page"
+npm run dev
+
+# Open mirror login page in your browser:
+# http://localhost:8081
+
+[Terminal 4] – AI SERVER (Flask, port 5002)
+------------------------------------------
+cd "C:\Users\provu\Desktop\jrmsu-ai-lib-system-main\ai_server"
+. .venv\Scripts\Activate.ps1
+python app.py
+
+[Terminal 5] – OLLAMA MODEL SERVER (port 11434)
+-----------------------------------------------
+ollama serve
+
+(If you have not yet pulled the model: `ollama pull llama3:8b-instruct-q4_K_M`)
+
+After all 5 terminals are running, the FULL SYSTEM is up:
+- MAIN APP (students/admins):  http://localhost:8080
+- MIRROR APP (entry/exit + QR): http://localhost:8081
+- BACKEND API:                 http://localhost:5000
+- AI SERVER:                   http://localhost:5002
+- OLLAMA:                      http://localhost:11434
+
+--------------------------------------
+OPTION 2 – USE START SCRIPTS (AUTO, ALL-IN-ONE, FROM POWERSHELL)
+--------------------------------------
+
+From ANY PowerShell window, in the project root:
+
+cd "C:\Users\provu\Desktop\jrmsu-ai-lib-system-main"
+
+Run one of the enforced startup scripts:
+
+- Start-All-Enforced.ps1
+- run_all_enforced.ps1
+
+Example:
+
+powershell -ExecutionPolicy Bypass -File .\Start-All-Enforced.ps1
+
+These scripts will:
+- Kill any process using ports 8080, 8081, 5000, 5002, 11434
+- Start:
+  - Python backend (5000)
+  - Main frontend (8080)
+  - Mirror frontend (8081)
+  - AI server (5002)
+  - Ollama (11434)
+
+Each service runs in its own new PowerShell window.
+
+--------------------------------------
+OPTION 3 – RUN BY DOUBLE-CLICKING THE PS1 OR BAT FILE
+--------------------------------------
+
+You can also start the whole system directly from File Explorer:
+
+1. Open the folder:
+   C:\Users\provu\Desktop\jrmsu-ai-lib-system-main
+
+2. EITHER double-click one of the PowerShell scripts:
+   - Start-All-Enforced.ps1
+   - run_all_enforced.ps1
+
+   (You may be prompted to allow the script to run depending on your PowerShell execution policy.)
+
+3. OR double-click the batch file:
+   - Start_all_system.bat
+
+   This .bat file will internally call `Start-All-Enforced.ps1` with ExecutionPolicy Bypass and launch all services.
+
+After a few seconds, multiple PowerShell windows will open (backend, main app, mirror app, AI server, Ollama). When they are all running, use:
+- http://localhost:8080  (Main App)
+- http://localhost:8081  (Mirror Page)
+
+--------------------------------------
+OPTIONAL – KILL/BREAK BUSY PORTS
+--------------------------------------
+
+If a port is already in use and you want to FREE it manually (without the Start-All-Enforced.ps1 script), you can run these from PowerShell AS NEEDED.
+
+Example: Kill anything on port 8080
+-----------------------------------
+$port = 8080
+$connections = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+if ($connections) {
+  $pids = $connections | Select-Object -ExpandProperty OwningProcess -Unique
+  Write-Host "Killing processes on port $port: $($pids -join ', ')"
+  foreach ($pid in $pids) {
+    Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue
+  }
+} else {
+  Write-Host "No process found on port $port."
+}
+
+You can change `$port = 8080` to any of:
+- 8080 (main app)
+- 8081 (mirror app)
+- 5000 (backend)
+- 5002 (AI server)
+- 11434 (Ollama)
+
+--------------------------------------
+SYSTEM CHECK (OPTIONAL)
+--------------------------------------
+
+To validate that everything is running correctly, you can run:
+
+cd "C:\Users\provu\Desktop\jrmsu-ai-lib-system-main"
+python COMPREHENSIVE_SYSTEM_CHECK.py
+
+This script checks:
+- MySQL connection and required DBs/tables
+- Backend API health (port 5001/5000 depending on config)
+- AI server, main frontend, mirror frontend, Ollama
+- Required .env files and Python modules
+
+--------------------------------------
+END OF RUNSYSTEM.txt
+--------------------------------------
