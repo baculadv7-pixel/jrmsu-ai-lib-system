@@ -1,0 +1,205 @@
+JRMSU AI-Library Management System
+An AI-Enhanced Smart Library Platform
+Presented by: Jhon Mark A. Suico & Group
+Jose Rizal Memorial State University – Katipunan Campus
+
+============================================================
+Background of the Study
+============================================================
+
+Traditional library operations at JRMSU rely on manual or semi-digital processes for:
+- User authentication and tracking who is inside the library.
+- Recording book borrowing, reservations, and returns.
+- Monitoring overdue books and sending reminders.
+
+These approaches lead to inefficiency, inconsistent records, limited real-time visibility, and a high manual workload for librarians.
+
+The JRMSU AI-Library Management System addresses these issues by integrating:
+- QR-based login and identity binding for students and administrators.
+- Optional Two-Factor Authentication (TOTP-based 2FA) for higher security.
+- A mirror login page at the library entrance/exit for real-time session tracking.
+- A Python-based backend that centralizes all library operations and logs.
+- An AI assistant, "Jose", that uses a local LLaMA 3 model and a curated knowledge base to answer questions about the library and system workflows.
+
+============================================================
+Objectives of the Study
+============================================================
+
+1. Develop an AI-enhanced library system with secure QR and 2FA authentication for both students and administrators.
+2. Automate book reservation, borrowing, returning, and notification workflows through a unified Python backend.
+3. Integrate an AI assistant that understands JRMSU library policies and provides concise, context-aware guidance.
+4. Provide real-time dashboards and activity logs so administrators can monitor library usage, active sessions, and circulation data.
+5. Improve data security, reliability, and auditability by using a structured MySQL schema with backup and export tools.
+
+============================================================
+Scope and Users
+============================================================
+
+Scope:
+- QR-based login in the main web app and at the mirror entry/exit page.
+- Username/password authentication with optional 2FA (TOTP) for students and admins.
+- Book inventory browsing, reservation, borrowing, and returning.
+- Real-time tracking of who is inside the library (library sessions).
+- AI assistant for system and policy questions, backed by a local model.
+- Notifications and activity logs, plus admin dashboard views and basic reports.
+
+Users:
+- Students
+  - Register and manage personal profiles.
+  - Log in via ID/password or QR code.
+  - Reserve books from the main app.
+  - Borrow and return books via QR scan at the mirror page.
+  - Receive notifications for reservations, borrows, returns, and overdue-related actions.
+- Library Administrators
+  - Manage student and admin accounts.
+  - Manage books and their QR codes.
+  - View dashboards, active sessions, and recent activity.
+  - Configure and use 2FA on high-privilege accounts.
+  - Use backup, audit export, and system version metadata.
+
+Limitations:
+- Relies on a local MySQL/MariaDB instance (`jrmsu_library`), typically via XAMPP.
+- AI assistant depends on the local Ollama runtime and the configured LLaMA 3 model; if Ollama or the model is not running, AI features are unavailable.
+- File-backed JSON storage (`data.json`) is used only as a development fallback when the database is down.
+
+============================================================
+Related Works / Studies
+============================================================
+
+Most traditional and older higher-education library systems focus on catalog management and basic circulation, often with:
+- Manual paper logs or single-computer systems at the front desk.
+- No QR-based identity, no 2FA, and limited audit trails.
+- Weak or no integration between physical entry/exit and book lending data.
+- No AI-driven support for users or administrators.
+
+The JRMSU AI-Library Management System distinguishes itself by combining:
+- QR-based identity and library session tracking.
+- A unified event and notifications system for administrators.
+- A mirror login page that connects physical presence with actual borrowing and returning events.
+- A local AI assistant that is grounded in the university’s library rules through a `system_knowledge.json` file.
+
+============================================================
+Technologies Used
+============================================================
+
+Frontend:
+- React 18
+- TypeScript
+- Vite (development server and bundler)
+- Tailwind CSS
+- shadcn UI (Radix UI-based component library)
+- React Router DOM
+- @tanstack/react-query (data fetching and caching)
+- socket.io-client (real-time communication with backend)
+- QR libraries: html5-qrcode, qrcode, qrcode.react, jsqr
+
+Backend:
+- Python 3.10+
+- Flask (HTTP API for main backend and AI server)
+- Flask-SocketIO (real-time events)
+- mysql-connector-python (MySQL/MariaDB access)
+- bcrypt (password hashing)
+- pyotp (TOTP 2FA)
+- requests, bleach, Pillow, openpyxl (supporting utilities)
+
+Database:
+- MySQL / MariaDB
+  - Database: jrmsu_library
+  - Optional AI logs DB: library_system_ai
+
+AI Module:
+- Python Flask app (`ai_server/app.py`)
+- Ollama runtime with LLaMA 3 model: `llama3:8b-instruct-q4_K_M`
+- system_knowledge.json for JRMSU library policies and flows
+- Optional sentiment analysis via TextBlob
+
+Version Control & Tools:
+- Git (local and/or GitHub)
+- ESLint, Vitest, Tailwind plugins (development tooling)
+
+============================================================
+System Design
+============================================================
+
+The system is implemented as a **multi-service architecture**:
+
+1. Main Web Application (Admin + Student Portal)
+   - Path: `jrmsu-wise-library-main/`
+   - Provides all UI for registration, login, profile management, book browsing, reservations, dashboards, reports, notifications, and AI chats.
+
+2. Python Backend (Core API + Auth + Library Integration)
+   - Path: `jrmsu-wise-library-main/python-backend/`
+   - Exposes REST APIs for students, admins, books, reservations, borrowing/returning, notifications, activity logs, 2FA, backups, and audit exports.
+   - Uses Socket.IO to push real-time events to frontends.
+
+3. Mirror Login Page (Library Entry/Exit + QR Borrow/Return)
+   - Path: `mirror-login-page/`
+   - A smaller React + TypeScript app that focuses on library entry/exit, session status, and QR-based borrow/return flows.
+
+4. AI Server
+   - Path: `ai_server/`
+   - A dedicated Flask app that exposes `/ai/chat` for the Jose assistant.
+   - Talks to Ollama and uses `system_knowledge.json` to stay aligned with JRMSU policies.
+
+5. MySQL/MariaDB Database
+   - Core tables: `students`, `admins`, `books`, `reservations`, `borrow_records`, `library_sessions`, `active_sessions`, `notifications`, `activity_log`, `audit_log`, `db_backups`, etc.
+
+A file-backed JSON store (`python-backend/data.json`) is used only as a fallback when MySQL is not available.
+
+============================================================
+System Demonstration
+============================================================
+
+Typical demonstration flows include:
+
+1. Login
+   - Students and admins log in via ID/password or QR code on the main app.
+   - Optional 2FA can be enabled for additional security.
+
+2. Dashboard
+   - Admins view key statistics: total books, active borrowers, borrowed today, overdue counts.
+   - The dashboard shows recent activity from the `activity_log` table and updates in real time via Socket.IO.
+
+3. Reservation, Borrowing, and Returning
+   - In the main app, a student reserves a book from `Books.tsx`.
+   - At the mirror page, the student logs in and the system checks their reservations and current loans.
+   - The student scans the book’s QR code to **borrow**, which converts the reservation into a borrow record.
+   - Later, the student uses the mirror again and scans the book’s QR code to **return**, updating availability and logs.
+
+4. Profile and Security
+   - Users can view and update their profiles.
+   - Admins and students can configure TOTP 2FA to protect accounts.
+
+5. Notifications
+   - Admins receive real-time notifications for reservations, borrows, returns, logins, logouts, and detected forgotten logouts.
+   - Students receive notifications for their own key events (e.g., reservations and returns), depending on configuration.
+
+6. AI Assistant
+   - Users open the AI assistant panel in the main app and ask questions about policies, workflows, or navigation (for example, "How do I borrow a book using QR?").
+   - The AI server replies using LLaMA 3 and the curated system knowledge file.
+
+============================================================
+Evaluation / Results
+============================================================
+
+Formal ISO/IEC 25010 scoring has not yet been conducted, but the current implementation emphasizes:
+
+- **Functionality** – Supports a complete cycle from registration and login, through reservation, borrowing, returning, and notification, with integration across main app, mirror page, backend, and AI server.
+- **Reliability** – Uses MySQL as the primary store with schema scripts and runtime checks, plus file-backed JSON fallback and a comprehensive system check script.
+- **Security** – Enforces ID formats, supports password hashing, 2FA, audit logging, auto-logout on inactivity, and role-aware endpoints.
+- **Usability** – Separates concerns between main and mirror interfaces, offers clear flows for staff and students, and includes an AI assistant to explain processes in plain language.
+
+Feedback and user testing can further quantify these aspects, but the design is intentionally aligned with software quality attributes like security, maintainability, and user experience.
+
+============================================================
+Acknowledgment
+============================================================
+
+We acknowledge the effort of the development team and the JRMSU Katipunan Campus stakeholders who contributed requirements, feedback, and validation during the design and implementation of this system.
+
+- **Jhon Mark Suico** – Team Leader & System Engineer
+- **Jhon Ernie Alimpong** – System Architect
+- **Viviene Punay** – Product Manager
+- **Lenny Mambo** – Data Analyst
+
+We also thank all faculty members, staff, and students who provided insights and support during development and testing of the JRMSU AI-Library Management System.
