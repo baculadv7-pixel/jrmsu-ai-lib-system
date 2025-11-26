@@ -572,8 +572,6 @@ This section maps specific features to code files and (conceptual) line ranges.
     - Uses `DashboardApi` for backend overlays
     - Uses `connectDashboardRealtime` to receive Socket.IO events from backend (`dashboardRealtime.ts`)
     - Recent Activity from `/api/activity-log` formatted with `formatActivityLine`
-  - `services/dashboardApi.ts` – HTTP client for `/api/dashboard/*`
-  - `services/stats.ts` – combines local stats with backend `summary()`
 
 - **Notifications & Admin Bell**
   - `components/Layout/Navbar.tsx`
@@ -583,30 +581,23 @@ This section maps specific features to code files and (conceptual) line ranges.
   - `services/notificationsApi.ts` – REST + realtime wrapper for `/api/notifications` endpoints
   - `services/notificationManager.ts` – higher-level notification helpers (e.g., `bookReserved`, `libraryLoginManual`, `libraryLogoutManual`), used in registration and book flows
 
-- **AI Assistant**
-  - `components/Layout/AIAssistant.tsx`, `components/ui/ai-assistant.tsx`
-  - `services/aiService.ts` and `services/aiSearchService.ts` – calls to AI server and AI-powered search
-
 ### Frontend: Mirror Login Page (`mirror-login-page/src`)
 
 - **Library Entry UI**
   - `pages/LibraryEntry.tsx`
     - Handles manual and QR logins (`AuthContext`)
     - Integrates `useLibrarySession()` for session creation and logout
-    - Coordinates `BookPickupDialog`, `BookReturnDialog`, `BorrowReturnPromptDialog`, `BookScannerDialog`
+    - Active sessions side panel (`ActiveSessionsPanel`)
+    - Book pickup/return prompts for reservations/borrows
+    - Book scanner dialog for QR-based borrow/return
 
 - **Library Session Context**
   - `context/LibrarySessionContext.tsx`
     - Tracks current session (`LibrarySession` type)
     - `createSession`, `endSession` → `/api/library/login`, `/api/library/logout`
-    - `checkUserStatus` → `/api/library/user-status/<userId>`
-    - `checkUserSessionStatus` → `/api/library/check-session/<userId>`
+    - `checkUserStatus` → `/api/library/user-status/{userId}`
+    - `checkUserSessionStatus` → `/api/library/check-session/{userId}`
     - `borrowBook`, `returnBook`, `cancelReservation`, `activateReturnTime` → respective `/api/library/*` endpoints
-
-- **QR Scanning**
-  - `components/library/BookScannerDialog.tsx` – wraps the QR scanner and uses callbacks
-  - `components/qr/QRScanner.tsx` – camera + QR decoding
-  - `components/library/BorrowReturnPromptDialog.tsx` – pre-scan prompt for borrow/return
 
 ### Backend: Python Core (`jrmsu-wise-library-main/python-backend`)
 
@@ -639,7 +630,7 @@ This section maps specific features to code files and (conceptual) line ranges.
   - Reservation operations (`/api/library/reserve-book`, `/api/library/cancel-reservation`)
   - Borrow/return operations (`/api/library/borrow-book`, `/api/library/return-book`)
   - Return time activation (`/api/library/activate-return-time`)
-  - Status endpoints (`/api/library/user-status/<userId>`, `/api/library/user-reservations/<userId>`, `/api/library/user-borrowed/<userId>`, and `*-all` variants for admins)
+  - Status endpoints (`/api/library/user-status/<user_id>`, `/api/library/user-reservations/<user_id>`, `/api/library/user-borrowed/<user_id>`, and `*-all` variants for admins)
   - Each operation integrates with `_notify_all_admins` for bell notifications and `_broadcast` for realtime dashboard events.
 
 - **Library Sessions & Active Sessions** – `library_session_manager.py`
@@ -648,6 +639,40 @@ This section maps specific features to code files and (conceptual) line ranges.
   - `/api/library/login`, `/api/library/logout`, `/api/library/force-logout`, `/api/library/check-session/<userId>`, `/api/library/active-sessions`, `/api/library/forgotten-logouts`
   - Uses `notify_all_admins` and `log_activity` to push activity into admin bell & `activity_log`
 
+### AI Server (`ai_server/app.py`)
+
+- Flask app that:
+  - Loads `system_knowledge.json`
+  - Talks to LLM (via local Ollama) as configured in env
+  - Exposes HTTP endpoints consumed by `aiService.ts` and `aiSearchService.ts` for:
+    - General AI Q&A
+    - Smart search over library content
+
+---
+
+## How to Run (Overview)
+
+1. **Backend** (Python):
+   - Navigate to `jrmsu-wise-library-main/python-backend`.
+   - Activate venv if needed, install requirements: `pip install -r requirements.txt`.
+   - Run: `python app.py` (default `http://localhost:5000`).
+
+2. **Main Frontend**:
+   - Navigate to `jrmsu-wise-library-main`.
+   - Install deps: `npm install`.
+   - Run dev server: `npm run dev` (default `http://localhost:8080`).
+
+3. **Mirror Frontend**:
+   - Navigate to `mirror-login-page`.
+   - Install deps: `npm install`.
+   - Run dev server: `npm run dev` (default `http://localhost:8081`).
+
+4. **AI Server**:
+   - Navigate to `ai_server`.
+   - Ensure Ollama is installed and running (`ollama serve`).
+   - Run: `python app.py` (binds to `http://localhost:5002`).
+
+Adjust `.env` files under each service (backend, frontend, AI) to point to the correct ports, DB credentials, and AI endpoints.
 - **Notification Endpoints & Overdue Handling** – `notification_endpoints.py`
   - Sends email/SMS/push notifications for overdue books
   - Maintains notification preferences per user (`/api/users/<user_id>/notification-preferences`)
