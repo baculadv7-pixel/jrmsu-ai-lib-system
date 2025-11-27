@@ -1368,6 +1368,8 @@ def admins_2fa_verify(admin_id: str):
     ok = verify_totp_code(secret, token, window=1)
     if not ok:
         return jsonify(valid=False), 400
+
+    # Persist to file-backed store (dev / fallback)
     db = _ensure_users()
     u = (db.get('users') or {}).get(admin_id)
     if not u:
@@ -1376,6 +1378,22 @@ def admins_2fa_verify(admin_id: str):
     u['twoFactorKey'] = secret
     db['users'][admin_id] = u
     save_db(db)
+
+    # Persist to MySQL when available so 2FA state survives restarts
+    if MYSQL_AVAILABLE:
+        try:
+            execute_query(
+                """
+                UPDATE admins
+                SET two_factor_enabled = 1,
+                    two_factor_key = %s
+                WHERE admin_id = %s OR id = %s
+                """,
+                (secret, admin_id, admin_id),
+            )
+        except Exception as e:
+            print(f"\u26a0\ufe0f admins_2fa_verify DB update failed: {e}")
+
     log_activity(admin_id, '2fa_enable')
     _emit('admins.updated', admin_id, {'twoFactorEnabled': True})
     return jsonify(valid=True)
@@ -1390,6 +1408,21 @@ def admins_2fa_disable(admin_id: str):
     u.pop('twoFactorKey', None)
     db['users'][admin_id] = u
     save_db(db)
+
+    if MYSQL_AVAILABLE:
+        try:
+            execute_query(
+                """
+                UPDATE admins
+                SET two_factor_enabled = 0,
+                    two_factor_key = NULL
+                WHERE admin_id = %s OR id = %s
+                """,
+                (admin_id, admin_id),
+            )
+        except Exception as e:
+            print(f"\u26a0\ufe0f admins_2fa_disable DB update failed: {e}")
+
     log_activity(admin_id, '2fa_disable')
     _emit('admins.updated', admin_id, {'twoFactorEnabled': False})
     return jsonify(ok=True)
@@ -1689,6 +1722,7 @@ def students_2fa_verify(student_id: str):
     ok = verify_totp_code(secret, token, window=1)
     if not ok:
         return jsonify(valid=False), 400
+
     db = _ensure_users()
     u = (db.get('users') or {}).get(student_id)
     if not u:
@@ -1697,6 +1731,21 @@ def students_2fa_verify(student_id: str):
     u['twoFactorKey'] = secret
     db['users'][student_id] = u
     save_db(db)
+
+    if MYSQL_AVAILABLE:
+        try:
+            execute_query(
+                """
+                UPDATE students
+                SET two_factor_enabled = 1,
+                    two_factor_key = %s
+                WHERE student_id = %s OR id = %s
+                """,
+                (secret, student_id, student_id),
+            )
+        except Exception as e:
+            print(f"\u26a0\ufe0f students_2fa_verify DB update failed: {e}")
+
     log_activity(student_id, '2fa_enable')
     _emit('students.updated', student_id, {'twoFactorEnabled': True})
     return jsonify(valid=True)
@@ -1711,6 +1760,21 @@ def students_2fa_disable(student_id: str):
     u.pop('twoFactorKey', None)
     db['users'][student_id] = u
     save_db(db)
+
+    if MYSQL_AVAILABLE:
+        try:
+            execute_query(
+                """
+                UPDATE students
+                SET two_factor_enabled = 0,
+                    two_factor_key = NULL
+                WHERE student_id = %s OR id = %s
+                """,
+                (student_id, student_id),
+            )
+        except Exception as e:
+            print(f"\u26a0\ufe0f students_2fa_disable DB update failed: {e}")
+
     log_activity(student_id, '2fa_disable')
     _emit('students.updated', student_id, {'twoFactorEnabled': False})
     return jsonify(ok=True)
@@ -2056,19 +2120,65 @@ def admins_register():
 
 @app.route('/api/users/<uid>/2fa', methods=['POST'])
 def toggle_2fa(uid: str):
-    db = load_db()
-    body = request.get_json(force=True)
+    body = request.get_json(force=True) or {}
     enabled = bool(body.get('enabled'))
+    secret = (body.get('secret') or '').strip() or None
+
+    # Update primary MySQL store when available so 2FA state survives restarts
+    if MYSQL_AVAILABLE:
+        # Try admin first
+        try:
+            row = AdminDB.get_admin_by_id(uid)
+        except Exception:
+            row = None
+        if row:
+            try:
+                execute_query(
+                    """
+                    UPDATE admins
+                    SET two_factor_enabled = %s,
+                        two_factor_key = %s
+                    WHERE admin_id = %s OR id = %s
+                    """,
+                    (1 if enabled else 0, secret, uid, uid),
+                )
+            except Exception as e:
+                print(f"\u26a0\ufe0f toggle_2fa admin DB update failed: {e}")
+        else:
+            # Try student
+            try:
+                row = StudentDB.get_student_by_id(uid)
+            except Exception:
+                row = None
+            if row:
+                try:
+                    execute_query(
+                        """
+                        UPDATE students
+                        SET two_factor_enabled = %s,
+                            two_factor_key = %s
+                        WHERE student_id = %s OR id = %s
+                        """,
+                        (1 if enabled else 0, secret, uid, uid),
+                    )
+                except Exception as e:
+                    print(f"\u26a0\ufe0f toggle_2fa student DB update failed: {e}")
+
+    # Also mirror to file-backed store for dev / fallback
+    db = load_db()
     users = db.setdefault("users", {})
     cur = users.get(uid, {"id": uid})
     cur['twoFactorEnabled'] = enabled
-    if enabled and body.get('secret'):
-        cur['twoFactorKey'] = body.get('secret')
+    if enabled and secret:
+        cur['twoFactorKey'] = secret
+    elif not enabled:
+        cur.pop('twoFactorKey', None)
     users[uid] = cur
     save_db(db)
+
     log_activity(uid, '2fa_enable' if enabled else '2fa_disable')
     _emit('user.2fa', uid, {"enabled": enabled})
-    return jsonify(ok=True, user=cur)
+    return jsonify(ok=True)
 
 # ---------- Books API (for Jose + frontend sync) ----------
 
@@ -2183,29 +2293,100 @@ def add_activity():
     log_activity(uid, action, details)
     return jsonify(ok=True)
 
-# Reports endpoints (derived from file-backed data)
+# Reports endpoints
 @app.route('/api/reports/top-borrowed')
 def api_top_borrowed():
+    """Return most-borrowed books based on real DB when available.
+
+    Fallback to file-backed borrows from data.json when MySQL is not
+    available. Shape: { items: [{title, borrows}] }.
+    """
+    # Prefer real DB (borrow_records joined with books)
+    if MYSQL_AVAILABLE:
+        try:
+            rows = execute_query(
+                """
+                SELECT
+                  COALESCE(b.title, br.book_title, CONCAT('BOOK #', br.book_id)) AS title,
+                  COUNT(*) AS borrows
+                FROM borrow_records br
+                LEFT JOIN books b ON b.id = br.book_id
+                GROUP BY br.book_id, title
+                ORDER BY borrows DESC
+                LIMIT 5
+                """,
+                (),
+                fetch_all=True,
+            ) or []
+            items = [
+                {
+                    'title': r.get('title') or '',
+                    'borrows': int(r.get('borrows') or 0),
+                }
+                for r in rows
+            ]
+            return jsonify(items=items)
+        except Exception as e:
+            print(f"⚠️  /api/reports/top-borrowed MySQL error: {e}")
+
+    # Fallback: file-backed borrows from data.json
     db = load_db()
-    counts = {}
-    for b in db.get('borrows', []):
+    counts: dict[str, int] = {}
+    for b in db.get('borrows', []) or []:
         title = b.get('bookTitle') or b.get('bookId')
-        if not title: 
+        if not title:
             continue
         counts[title] = counts.get(title, 0) + 1
-    top = sorted(({"title": k, "borrows": v} for k,v in counts.items()), key=lambda x: x['borrows'], reverse=True)[:5]
+    top = sorted(
+        ({'title': k, 'borrows': v} for k, v in counts.items()),
+        key=lambda x: x['borrows'],
+        reverse=True,
+    )[:5]
     return jsonify(items=top)
+
 
 @app.route('/api/reports/category-dist')
 def api_category_dist():
+    """Return distribution of books across categories.
+
+    Uses real DB `books` table when available; falls back to data.json
+    when MySQL is not available. Shape:
+      { items: [{category, percentage}] }
+    """
+    # Prefer real DB
+    if MYSQL_AVAILABLE:
+        try:
+            rows = execute_query(
+                "SELECT category, COUNT(*) AS c FROM books GROUP BY category",
+                (),
+                fetch_all=True,
+            ) or []
+            total = sum(int(r.get('c') or 0) for r in rows) or 1
+            items = []
+            for r in rows:
+                cat = r.get('category') or 'Uncategorized'
+                c = int(r.get('c') or 0)
+                pct = round((c / total) * 100)
+                items.append({'category': cat, 'percentage': pct})
+            return jsonify(items=items)
+        except Exception as e:
+            print(f"⚠️  /api/reports/category-dist MySQL error: {e}")
+
+    # Fallback: file-backed books
     db = load_db()
-    counts = {}
-    books = db.get('books', [])
+    counts: dict[str, int] = {}
+    books = db.get('books', []) or []
     for b in books:
-        cat = (b.get('category') or 'Uncategorized')
+        cat = b.get('category') or 'Uncategorized'
         counts[cat] = counts.get(cat, 0) + 1
     total = len(books) or 1
-    dist = [{"category": k, "percentage": round((v/total)*100)} for k,v in counts.items()]
+    dist = [
+        {
+            'category': k,
+            'percentage': round((v / total) * 100),
+        }
+        for k, v in counts.items()
+    ]
     return jsonify(items=dist)
 
 # -------------------- Dashboard API --------------------

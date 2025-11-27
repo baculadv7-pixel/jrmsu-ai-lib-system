@@ -29,7 +29,13 @@ export function connectOverlaysRealtime(onEvent: (event: OverlayEvent, payload: 
     try {
       const io = await getIO();
       if (cancelled) return;
-      socket = io(API.BACKEND.BASE, { transports: ["websocket", "polling"], withCredentials: true });
+      socket = io(API.BACKEND.BASE, {
+        transports: ["polling"],
+        withCredentials: true,
+        reconnection: true,
+        reconnectionAttempts: 3,
+        reconnectionDelay: 1000,
+      });
       const events: OverlayEvent[] = ['students.updated','admins.updated','user.updated','session_update'];
       events.forEach(ev => socket.on(ev, (p: any) => onEvent(ev, p)));
     } catch (e) {

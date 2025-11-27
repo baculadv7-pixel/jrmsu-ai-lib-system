@@ -82,6 +82,7 @@ const BookManagement = () => {
       const rv = Array.isArray(rvRes.reservations) ? rvRes.reservations : [];
       setBorrowedCount(b.length);
       setReservationCount(rv.length);
+      setReservationsData(rv);
     } catch {
       setBorrowedCount(0);
       setReservationCount(0);
@@ -97,9 +98,11 @@ const BookManagement = () => {
   const [showTotal, setShowTotal] = useState(false);
   const [showAvailable, setShowAvailable] = useState(false);
   const [showBorrowed, setShowBorrowed] = useState(false);
+  const [showReservations, setShowReservations] = useState(false);
   const [showCategories, setShowCategories] = useState(false);
   const [overlaySearch, setOverlaySearch] = useState("");
   const [borrowedData, setBorrowedData] = useState<any[]>([]);
+  const [reservationsData, setReservationsData] = useState<any[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [borrowedCount, setBorrowedCount] = useState(0);
   const [reservationCount, setReservationCount] = useState(0);
@@ -237,18 +240,20 @@ const BookManagement = () => {
 
   // Realtime for overlays
   useEffect(() => {
-    const anyOpen = showTotal || showAvailable || showBorrowed || showCategories;
+    const anyOpen = showTotal || showAvailable || showBorrowed || showReservations || showCategories;
     if (!anyOpen) return;
     const disconnect = connectDashboardRealtime(async (ev) => {
       if (ev === 'book.added' || ev === 'book.removed') {
         loadData();
       } else if ((ev === 'book.borrowed' || ev === 'book.returned') && showBorrowed) {
         await fetchBorrowed();
+      } else if (ev === 'reservation.created' || ev === 'reservation.cancelled') {
+        await refreshBorrowAndReservationCounts();
       }
     });
     return () => disconnect();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showTotal, showAvailable, showBorrowed, showCategories]);
+  }, [showTotal, showAvailable, showBorrowed, showReservations, showCategories]);
 
   const fetchBorrowed = async () => {
     try {
@@ -788,6 +793,62 @@ const BookManagement = () => {
                   </div>
                 </div>
               ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Reservations Overlay */}
+      <Dialog open={showReservations} onOpenChange={setShowReservations}>
+        <DialogContent className="sm:max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Book Reservations ({reservationCount})</DialogTitle>
+            <DialogDescription>Books reserved by students (DB-backed, same as Book Inventory)</DialogDescription>
+          </DialogHeader>
+          <div className="mb-3">
+            <Input
+              placeholder="Search: Book title, User ID, Category"
+              value={overlaySearch}
+              onChange={(e)=>setOverlaySearch(e.target.value)}
+            />
+          </div>
+          <div className="max-h-[60vh] overflow-auto divide-y text-sm">
+            {reservationsData.length === 0 ? (
+              <div className="text-center py-12">
+                <p className="text-muted-foreground text-lg">No data yet</p>
+                <p className="text-sm text-muted-foreground mt-2">No reservations have been made yet</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="grid grid-cols-5 gap-2 px-1 text-xs font-medium sticky top-0 bg-background py-2 border-b">
+                  <div>Book Title</div>
+                  <div>User ID</div>
+                  <div>Quantity</div>
+                  <div>Status</div>
+                  <div>Reserved At</div>
+                </div>
+                {reservationsData
+                  .filter(r => {
+                    const q = overlaySearch.toLowerCase();
+                    if (!q) return true;
+                    return [r.book_title || r.bookTitle || '', r.user_id || r.userId || '', r.category || '']
+                      .some((v:string)=>String(v).toLowerCase().includes(q));
+                  })
+                  .map((r:any) => {
+                    const ts = r.reserved_at || r.reservedAt;
+                    let dt = '';
+                    try { if (ts) dt = new Date(ts).toLocaleString(); } catch {}
+                    return (
+                      <div key={r.id || r.reservation_id} className="grid grid-cols-5 gap-2 px-1 py-2">
+                        <div className="font-medium">{r.book_title || r.bookTitle || r.title}</div>
+                        <div className="font-mono text-xs">{r.user_id || r.userId}</div>
+                        <div>{r.quantity ?? 1}</div>
+                        <div><Badge variant="outline">{r.status || 'pending'}</Badge></div>
+                        <div className="text-xs text-muted-foreground">{dt}</div>
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

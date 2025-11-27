@@ -117,7 +117,8 @@ export function NotificationPanel({
   };
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
+    <>
+      <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="relative text-navy-foreground hover:bg-navy-foreground/10">
           <Bell className="h-5 w-5" />
@@ -389,6 +390,6 @@ export function NotificationPanel({
         </div>
       </DialogContent>
     </Dialog>
-  </>
+    </>
   );
 }

@@ -1,0 +1,216 @@
+JRMSU AI-Library System – Admin Flowchart (Text + Mermaid)
+
+This file describes the **admin-side flows** across:
+- Main web app (manual login, 2FA, QR login, admin registration)
+- Mirror login page (physical library entry/exit, QR borrow/return)
+- Python backend (auth, sessions, library operations, notifications, system admin)
+- Databases (`jrmsu_library`, optional `library_system_ai`)
+
+You can paste the Mermaid block below into the Mermaid Live Editor to visualize it.
+
+flowchart TD
+
+%% ==========================
+%% BRAND & CONTEXT
+%% ==========================
+JRMSU[(JRMSU Logo<br>JRMSU AI-Library System<br>Jose Rizal Memorial State University)]
+
+%% ==========================
+%% ENTRY POINTS
+%% ==========================
+subgraph Entry["Admin Entry Points"]
+  LManual["Manual Login (Admin)<br>Main Web App /login"]
+  LQR["QR Code Login (Admin)<br>Main Web App - QR Login"]
+  LMirror["Mirror Page Login (Admin)<br>mirror-login-page"]
+end
+
+JRMSU --> LManual
+JRMSU --> LQR
+JRMSU --> LMirror
+
+%% ==========================
+%% AUTH & 2FA
+%% ==========================
+subgraph AuthMain["Auth & 2FA – Main App"]
+  Creds["Enter Admin ID + Password<br>Admin ID Example: KCL-00045"]
+  TwoFAState{"Is 2FA enabled?"}
+  TwoFADialog["Enter 6-digit 2FA code"]
+  LoginSuccess["Login Success → Admin Dashboard"]
+  LoginError["Login Error"]
+end
+
+LManual --> Creds --> TwoFAState
+TwoFAState -->|2FA Disabled| LoginSuccess
+TwoFAState -->|2FA Enabled| TwoFADialog -->|Valid Code| LoginSuccess
+TwoFADialog -->|Invalid Code| LoginError
+Creds -->|Invalid Credentials| LoginError
+
+%% QR LOGIN
+subgraph QRMain["QR Login – Main App"]
+  QRScan["Scan JRMSU QR Code"]
+  QRDetect{"QR Payload: Admin or Student?"}
+end
+
+LQR --> QRScan --> QRDetect
+QRDetect -->|Admin| LoginSuccess
+QRDetect -->|Student| LoginSuccess
+
+%% ==========================
+%% REGISTER (4 PHASES)
+%% ==========================
+subgraph Reg4["Admin Registration – 4 Phases"]
+  RegLink["Register here"]
+  P1Choice["Phase 1: Choose Account Type"]
+  P2Form["Phase 2: Personal Information"]
+  P3Form["Phase 3: Institutional Info<br>Admin ID, Role, Contact"]
+  P4Form["Phase 4: Security Setup<br>Password Requirements"]
+  P4QR["Automatic QR Code Generation"]
+end
+
+LoginError --> RegLink
+RegLink --> P1Choice --> P2Form --> P3Form --> P4Form --> P4QR --> LoginSuccess
+
+%% ==========================
+%% BACKEND AUTH & DB
+%% ==========================
+subgraph BackendAuth["Python Backend – Authentication"]
+  AuthAPI["/api/admins/*<br>/api/users/*"]
+end
+
+subgraph DBAuth["Database – Identity Storage"]
+  DBAdmins[("admins table")]
+  DBStudents[("students table")]
+end
+
+Creds --> AuthAPI --> DBAdmins
+QRScan --> AuthAPI
+Reg4 --> AuthAPI --> DBAdmins
+
+%% ==========================
+%% MIRROR PAGE FLOW
+%% ==========================
+subgraph Mirror["Mirror Login Page – Library Entry/Exit"]
+  MLogin["Mirror Login UI"]
+  MAuth["Mirror Authentication"]
+  MCreateSession["Create Library Session"]
+  MCheckStatus["Check User Status"]
+  MLogoutFlow["Logout Flow"]
+end
+
+LMirror --> MLogin --> MAuth --> MCreateSession --> MCheckStatus
+MLogoutFlow --> MCreateSession
+
+subgraph BackendLib["Python Backend – Library Sessions"]
+  LibSessAPI["Library Session Manager<br>/api/library/*"]
+end
+
+subgraph DBLibSess["Library DB"]
+  DBLibSessions[("library_sessions table")]
+  DBActiveSessions[("active_sessions table")]
+  DBActivity[("activity_log table")]
+end
+
+MCreateSession --> LibSessAPI --> DBLibSessions
+LibSessAPI --> DBActiveSessions
+LibSessAPI --> DBActivity
+MLogoutFlow --> LibSessAPI
+
+%% ==========================
+%% MAIN DASHBOARD & UI
+%% ==========================
+subgraph MainUI["Admin Main Dashboard"]
+  NavBar["Top Navigation Bar"]
+  SideBar["Sidebar Menu"]
+  Dash["Dashboard Overview"]
+  BookInv["Book Inventory"]
+  BorrowHistory["Borrow/Return History"]
+  StudMgmt["Student Management"]
+  AdminMgmt["Admin Management"]
+  BookMgmt["Book Management"]
+  Reports["Reports & Analytics"]
+  Auth2FA["Authentication & 2FA Settings"]
+  SysAdmin["System Administrator Panel"]
+  ProfilePage["Admin Profile Page"]
+end
+
+LoginSuccess --> NavBar
+LoginSuccess --> SideBar
+NavBar --> Dash
+SideBar --> Dash
+SideBar --> BookInv
+SideBar --> BorrowHistory
+SideBar --> StudMgmt
+SideBar --> AdminMgmt
+SideBar --> BookMgmt
+SideBar --> Reports
+SideBar --> Auth2FA
+SideBar --> SysAdmin
+SideBar --> ProfilePage
+
+
+%% ============================================================
+%%                🎨 COLOR STYLING (ADDED ONLY)
+%% ============================================================
+
+%% ENTRY POINTS
+classDef entry fill:#31B057,stroke:#1F4D2A,stroke-width:2px,color:#fff;
+
+%% AUTH & 2FA
+classDef auth fill:#D4A017,stroke:#8A6E00,stroke-width:2px,color:#fff;
+
+%% LOGIN ERROR (RED)
+classDef error fill:#C62828,stroke:#7A1B1B,stroke-width:2px,color:#fff;
+
+%% QR LOGIN
+classDef qr fill:#0073E6,stroke:#003E80,stroke-width:2px,color:#fff;
+
+%% REGISTRATION PHASES
+classDef reg fill:#0B6B3A,stroke:#063D22,stroke-width:2px,color:#fff;
+
+%% BACKEND AUTH API
+classDef backend fill:#5A3EC8,stroke:#38257A,stroke-width:2px,color:#fff;
+
+%% DATABASES
+classDef db fill:#8B5A2B,stroke:#4A3016,stroke-width:2px,color:#fff;
+
+%% MIRROR PAGE
+classDef mirror fill:#C7A600,stroke:#7F6B00,stroke-width:2px,color:#fff;
+
+%% LIBRARY SESSION BACKEND
+classDef libs fill:#4758A8,stroke:#29346B,stroke-width:2px,color:#fff;
+
+%% MAIN UI
+classDef ui fill:#FF8A30,stroke:#B85A10,stroke-width:2px,color:#fff;
+
+
+%% ============================================================
+%%             APPLY CLASSES TO NODE GROUPS
+%% ============================================================
+
+%% ENTRY POINT NODES
+class LManual,LQR,LMirror entry;
+
+%% AUTH NODES
+class Creds,TwoFAState,TwoFADialog,LoginSuccess auth;
+class LoginError error;
+
+%% QR
+class QRScan,QRDetect qr;
+
+%% REGISTRATION
+class RegLink,P1Choice,P2Form,P3Form,P4Form,P4QR reg;
+
+%% BACKEND AUTH
+class AuthAPI backend;
+class DBAdmins,DBStudents db;
+
+%% MIRROR PAGE
+class MLogin,MAuth,MCreateSession,MCheckStatus,MLogoutFlow mirror;
+
+%% LIBRARY SESSION BACKEND
+class LibSessAPI libs;
+class DBLibSessions,DBActiveSessions,DBActivity db;
+
+%% UI PANELS
+class NavBar,SideBar,Dash,BookInv,BorrowHistory,StudMgmt,AdminMgmt,BookMgmt,Reports,Auth2FA,SysAdmin,ProfilePage ui;
+

@@ -1,0 +1,461 @@
+flowchart TD
+
+%% USERS
+UStudent["Student User"]
+UAdmin["Admin User"]
+
+%% MAIN FRONTEND
+subgraph MainApp["Main Web App (React + TypeScript)"]
+    LLogin["Login & Registration"]
+    BBooks["Books Page"]
+    BManage["Book Management"]
+    DDash["Admin Dashboard"]
+    NBell["Notification Bell"]
+    AIAssist["AI Assistant"]
+end
+
+%% MIRROR FRONTEND
+subgraph Mirror["Mirror Login Page"]
+    MEntry["Library Entry & Exit"]
+    MScanner["QR Borrow/Return Scanner"]
+    MSessions["Active Sessions Panel"]
+end
+
+%% PYTHON BACKEND
+subgraph Backend["Python Backend (Flask + Socket.IO)"]
+    AuthRoutes["Auth API"]
+    LEndpoints["Library Endpoints"]
+    LSessionMgr["Library Session Manager"]
+    NRoutes["Notification Routes"]
+    NService["Notification Service"]
+end
+
+%% DATABASES
+DBMain["MySQL: jrmsu_library"]
+DBFile["data.json (User + Activity Backup)"]
+
+%% AI SERVER
+subgraph AIServer["AI Server (Flask + Ollama)"]
+    AIHTTP["/ai/chat"]
+    AIKB["system_knowledge.json"]
+    AIDBAI["AI Logs (MySQL)"]
+end
+
+%% USER -> MAIN APP
+UStudent --> LLogin
+UAdmin --> LLogin
+
+LLogin --> AuthRoutes
+AuthRoutes --> DBMain
+AuthRoutes --> DBFile
+
+%% BOOKS & RESERVATIONS
+UStudent --> BBooks
+UAdmin --> BBooks
+BBooks --> LEndpoints
+LEndpoints --> DBMain
+LEndpoints --> NService
+
+%% NOTIFICATIONS
+NService --> DBMain
+NRoutes --> DBMain
+NBell --> NRoutes
+
+%% DASHBOARD
+DDash --> NRoutes
+
+%% MIRROR SESSION SYSTEM
+UStudent --> MEntry
+UAdmin --> MEntry
+MEntry --> AuthRoutes
+MEntry --> LSessionMgr
+LSessionMgr --> DBMain
+LSessionMgr --> NService
+
+MSessions --> LSessionMgr
+
+%% QR BORROW / RETURN
+MEntry --> MScanner
+MScanner --> LEndpoints
+LEndpoints --> DBMain
+LEndpoints --> NService
+
+%% LOGOUT
+MEntry --> LSessionMgr
+
+%% AI ASSISTANT FLOW
+UStudent --> AIAssist
+UAdmin --> AIAssist
+
+AIAssist --> AIHTTP
+AIHTTP --> AIKB
+AIHTTP --> AIDBAI
+
+
+
+graph TD
+
+  subgraph FRONTENDS
+    MAIN["Main Frontend<br/>React + TypeScript (8080)"]
+    MIRROR["Mirror / Kiosk Frontend<br/>React + TypeScript (8081)"]
+  end
+
+  subgraph BACKEND
+    FLASK["Flask Backend<br/>python-backend (5000)"]
+    AI_SERVER["AI Server (Jose)<br/>ai_server/app.py (5002)"]
+  end
+
+  subgraph INFRA
+    MYSQL[("MySQL / MariaDB<br/>Database: jrmsu_library")]
+    DATA_JSON["File Store<br/>data.json (fallback)"]
+    OLLAMA[("Ollama LLM<br/>Port 11434 (llama3)")]
+    BACKUP_FILES[("Backup Files<br/>backupdb/*.json.gz")]
+  end
+
+  MAIN -->|REST / Socket.IO| FLASK
+  MIRROR -->|REST / Socket.IO| FLASK
+
+  FLASK -->|SQL Queries| MYSQL
+  FLASK -->|Fallback Read/Write| DATA_JSON
+
+  FLASK -->|Backup Export| BACKUP_FILES
+
+  AI_SERVER -->|HTTP Requests| FLASK
+  AI_SERVER -->|Subprocess LLM Call| OLLAMA
+
+  FLASK -->|Realtime Events| SOCKETIO
+  SOCKETIO --> MAIN
+  SOCKETIO --> MIRROR
+
+
+
+graph TD
+
+  subgraph FRONTENDS
+    MAIN["Main Frontend<br/>React + TypeScript (8080)"]
+    MIRROR["Mirror/Kiosk Frontend<br/>React + TypeScript (8081)"]
+  end
+
+  subgraph BACKEND
+    FLASK["Flask Backend<br/>python-backend (5000)"]
+    AI_SERVER["AI Server (Jose)<br/>ai_server/app.py (5002)"]
+  end
+
+  subgraph INFRASTRUCTURE
+    MYSQL[("MySQL / MariaDB<br/>Database: jrmsu_library")]
+    DATA_JSON["data.json<br/>(Fallback storage)"]
+    OLLAMA[("Ollama LLM<br/>llama3 — Port 11434")]
+    BACKUP_FILES[("backupdb/*.json.gz<br/>Backup metadata")]
+  end
+
+  MAIN -->|REST / Socket.IO| FLASK
+  MIRROR -->|REST / Socket.IO| FLASK
+
+  FLASK -->|Queries / Writes| MYSQL
+  FLASK -->|Fallback R/W| DATA_JSON
+
+  FLASK --> SocketIO[("Socket.IO Realtime Events")]
+
+  AI_SERVER -->|HTTP Context Request| FLASK
+  AI_SERVER -->|Subprocess LLM Call| OLLAMA
+
+  FLASK -->|Creates Backups| BACKUP_FILES
+  SocketIO --> MAIN
+  SocketIO --> MIRROR
+
+
+  %% ===== ADMIN - COMPACT FLOW (INSERTED) =====
+  flowchart TD
+    subgraph AdminOnly["Admin Flow — Compact (start → end)"]
+      AStart((Start / Admin Portal))
+      AChooseLogin["Choose Login Method\n(Manual or QR)"]
+      AMManual["Manual Login\nPOST /api/admins/login"]
+      AMQR["QR Login (Mirror)\nPOST /api/library/login"]
+      AAuth["Auth & Verify\nDB: admins SELECT → bcrypt → optional 2FA"]
+      ASession["Create Session\nJWT / cookie + optional library session"]
+      ASocket["Connect Socket.IO\nJoin admin room"]
+      ADashboard["Admin Dashboard\nManage Books / Users / Sessions / Notifs / Backups"]
+      AAction["Admin Action\n(e.g. add book, create admin, backup)"]
+      ADB["DB / StoreProc Writes\n(e.g. INSERT books, CALL sp_register_admin, db_backups metadata)"]
+      ANotif["Create Notification / Emit via Socket.IO"]
+      AAudit["Audit Log Entry\n(activity_log / audit_log)"]
+      ALogout["Logout → POST /api/admins/logout"]
+    end
+
+    AStart --> AChooseLogin
+    AChooseLogin --> AMManual
+    AChooseLogin --> AMQR
+    AMManual --> AAuth
+    AMQR --> AAuth
+    AAuth -->|ok| ASession
+    AAuth -->|fail| AChooseLogin
+    ASession --> ASocket
+    ASocket --> ADashboard
+    ADashboard --> AAction
+    AAction --> ADB
+    ADB --> ANotif
+    ADB --> AAudit
+    ADashboard --> ALogout
+    ALogout --> AStart
+
+  %% ===== ADMIN - BOOK MANAGEMENT (DETAILED SEQUENCE) =====
+  sequenceDiagram
+    participant AdminUI as "Admin UI (Book Mgmt)"
+    participant Backend as "Flask Backend / LEndpoints"
+    participant DB as "MySQL: books table / db_procs"
+    participant Notif as "Notification Service"
+    participant Audit as "Audit Logger"
+
+    Note over AdminUI: Admin opens Book Management → Create Book form
+    AdminUI->>Backend: POST /api/books
+    note right of AdminUI: payload: { title, author, isbn, copies, category, shelf }
+    Backend->>DB: INSERT INTO books (title, author, ...) VALUES (...)
+    alt DB success
+      DB-->>Backend: {insertId: 123}
+      Backend->>Notif: create notification {type:'system', title:'Book added', audience:'admins'}
+      Backend->>Audit: insert activity_log {actor:adminId, action:'book.create', bookId:123}
+      Backend-->>AdminUI: 201 {bookId:123, message:'created'}
+    else DB failure
+      DB-->>Backend: error
+      Backend->>Audit: insert activity_log {actor:adminId, action:'book.create.failed', error}
+      Backend-->>AdminUI: 500 {error:'db error'}
+    end
+
+    Note over AdminUI: Admin updates book
+    AdminUI->>Backend: PUT /api/books/:id
+    note right of AdminUI: payload: { available_copies, status, metadata }
+    Backend->>DB: UPDATE books SET ... WHERE id=:id
+    alt DB success
+      Backend->>Notif: generate 'book.updated' notification
+      Backend->>Audit: insert activity_log {action:'book.update', bookId}
+      Backend-->>AdminUI: 200 {updated:true}
+    else
+      Backend->>Audit: log update_failed
+      Backend-->>AdminUI: 500
+    end
+
+    Note over AdminUI: Admin deletes a book
+    AdminUI->>Backend: DELETE /api/books/:id
+    Backend->>DB: DELETE FROM books WHERE id=:id
+    alt deleted
+      Backend->>Audit: insert activity_log {action:'book.delete', bookId}
+      Backend->>Notif: emit 'book.removed'
+      Backend-->>AdminUI: 200 {deleted:true}
+    else not found
+      Backend-->>AdminUI: 404 {message:'not found'}
+    end
+
+  %% ===== ADMIN - SESSION MONITOR (DETAILED SEQUENCE) =====
+  sequenceDiagram
+    participant AdminUI as "Admin Dashboard (Sessions)"
+    participant Backend as "Flask Backend / LSessionMgr"
+    participant DB as "MySQL: library_sessions"
+    participant Socket as "Socket.IO"
+    participant Audit as "audit_log"
+
+    Note over AdminUI: Admin opens Active Sessions panel
+    AdminUI->>Backend: GET /api/library/active-sessions
+    Backend->>DB: SELECT * FROM library_sessions WHERE status='active'
+    DB-->>Backend: [ {sessionId, userId, action_count, last_activity}, ... ]
+    Backend-->>AdminUI: 200 {sessions: [...]}
+
+    Note over AdminUI: Admin forces a logout for a user
+    AdminUI->>Backend: POST /api/library/force-logout { userId }
+    Backend->>DB: UPDATE library_sessions SET status='logged_out', action_count=action_count+1 WHERE userId=:userId AND status='active'
+    alt update success
+      DB-->>Backend: {affectedRows:1}
+      Backend->>Socket: emit 'session_update' {userId, status:'logged_out'}
+      Backend->>Audit: insert activity_log {actor:adminId, action:'force_logout', userId}
+      Backend-->>AdminUI: 200 {ok:true}
+    else
+      Backend->>Audit: insert activity_log {actor:adminId, action:'force_logout_failed', userId}
+      Backend-->>AdminUI: 404 {message:'no active session'}
+    end
+
+    Note over Socket,AdminUI: Real-time update
+    Socket->>AdminUI: 'session_update' event — UI removes session or marks logged_out
+
+  %% ===== ADMIN DASHBOARD CLICK-PATH (PAGES → ENDPOINTS) =====
+  flowchart LR
+    subgraph AdminDashboardMap["Admin Dashboard — Click Path"]
+      Nav["Navbar (notifications, settings, logout)"]
+      Sidebar["Sidebar (menu)"]
+      Dash["Dashboard Home → /dashboard"]
+      Users["Student Mgmt → /students (GET/POST/PUT/DELETE)"]
+      Admins["Admin Mgmt → /admins (GET/POST/PUT/DELETE) & sp_register_admin"]
+      Books["Book Mgmt → /books (GET/POST/PUT/DELETE)"]
+      Sessions["Session Monitor → /api/library/active-sessions & /api/library/force-logout"]
+      Reports["Reports → /api/reports/* (top-borrowed, category-dist)"]
+      Audit["Activity Log / Export → /api/activity or /api/audit, /api/audit/export"]
+      AILog["AI Assistant → /ai/chat (context + logs)"]
+    end
+
+    Nav --> Dash
+    Sidebar --> Dash
+    Sidebar --> Users
+    Sidebar --> Admins
+    Sidebar --> Books
+    Sidebar --> Sessions
+    Sidebar --> Reports
+    Sidebar --> Audit
+    Sidebar --> AILog
+
+  %% End of admin additions
+
+
+%% ===== STUDENT - COMPACT FLOW (INSERTED) =====
+flowchart TD
+  subgraph StudentOnly["Student Flow — Compact (start → end)"]
+    SStart((Start / Student Portal))
+    SChooseLogin["Choose Login Method\n(Manual | QR at Mirror)"]
+    SManual["Manual Login\nPOST /api/login"]
+    SQR["QR Login (Mirror)\nPOST /api/library/login"]
+    SAuth["Auth & Verify\nDB: students SELECT → bcrypt → optional 2FA"]
+    SSession["Create Session\nJWT / cookie + library session (LSM)"]
+    SSocket["Connect Socket.IO\nJoin student room"]
+    SDash["Student Main UI\nBooks, Reservations, Borrow/Return, Profile"]
+    SReserve["Reserve Book\nPOST /api/library/reserve-book"]
+    SBorrow["Borrow via Mirror\nPOST /api/library/borrow-book"]
+    SReturn["Return via Mirror\nPOST /api/library/return-book"]
+    SDB["DB Writes\nreservations, borrow_records, books.available_copies"]
+    SNotif["Notifications & Emitted Events"]
+    SAudit["Audit Log Entry / activity_log"]
+    SLogout["Logout → POST /api/library/logout"]
+  end
+
+  SStart --> SChooseLogin
+  SChooseLogin --> SManual
+  SChooseLogin --> SQR
+  SManual --> SAuth
+  SQR --> SAuth
+  SAuth -->|ok| SSession
+  SAuth -->|fail| SChooseLogin
+  SSession --> SSocket
+  SSocket --> SDash
+  SDash --> SReserve
+  SDash --> SLogout
+  SReserve --> SDB
+  SDB --> SNotif
+  SDB --> SAudit
+  SDash --> SBorrow
+  SDash --> SReturn
+  SBorrow --> SDB
+  SReturn --> SDB
+  SLogout --> SStart
+
+%% ===== STUDENT - REGISTRATION & LOGIN SEQUENCE =====
+sequenceDiagram
+  participant StudentUI as "Student Web UI"
+  participant Mirror as "Mirror Kiosk UI"
+  participant Backend as "Flask Backend (Auth & LEndpoints)"
+  participant DB as "MySQL: students table"
+  participant LSM as "Library Session Manager"
+  participant Notif as "Notification Service"
+  participant Audit as "audit_log / activity_log"
+
+  Note over StudentUI: Student registers on main site
+  StudentUI->>Backend: POST /api/students/register {payload}
+  note right of StudentUI: payload includes personal info + contact
+  Backend->>DB: CALL sp_register_student(payload)
+  alt success
+    DB-->>Backend: {studentId}
+    Backend->>Audit: write 'student_registered'
+    Backend-->>StudentUI: 201 {studentId, message}
+  else duplicate/validation failure
+    Backend-->>StudentUI: 400 {error: 'already_exists' | 'invalid'}
+  end
+
+  Note over StudentUI: Student login (manual)
+  StudentUI->>Backend: POST /api/login {id, password}
+  Backend->>DB: SELECT student WHERE id=:id
+  alt found & password ok
+    Backend->>LSM: create library_session (action_count odd)
+    LSM-->>Backend: {sessionId}
+    Backend->>Notif: create login notification
+    Backend->>Audit: log 'user_login'
+    Backend-->>StudentUI: 200 {sessionId}
+  else invalid
+    Backend-->>StudentUI: 401
+  end
+
+  Note over Mirror: QR login flow
+  Mirror->>Backend: POST /api/library/login {qrData}
+  Backend->>DB: validate QR -> SELECT student OR admin
+  alt user valid
+    Backend->>LSM: create_login_session
+    LSM-->>Backend: {sessionId}
+    Backend->>Notif: send session notification
+    Backend-->>Mirror: 200 {sessionId}
+  else invalid/expired QR
+    Backend-->>Mirror: 401/400 error
+  end
+
+%% ===== STUDENT - RESERVE → BORROW → RETURN (DETAILED SEQUENCE) =====
+sequenceDiagram
+  participant StudentUI as "Student UI / Mirror"
+  participant Backend as "Flask Backend / LEndpoints"
+  participant DB as "MySQL: books, reservations, borrow_records"
+  participant Notif as "Notification Service / Socket.IO"
+  participant Audit as "audit_log"
+
+  Note over StudentUI: Reserve book from main UI
+  StudentUI->>Backend: POST /api/library/reserve-book {userId, bookId}
+  Backend->>DB: SELECT books.available_copies WHERE id=bookId
+  alt available >=1
+    Backend->>DB: INSERT INTO reservations (userId,bookId,status='pending',created_at=NOW())
+    Backend->>DB: UPDATE books SET available_copies = available_copies - 1 WHERE id=bookId
+    Backend->>Notif: create reservation notification
+    Backend->>Audit: insert 'reserve_book'
+    Backend-->>StudentUI: 200 {reserved:true}
+  else none
+    Backend-->>StudentUI: 400 {error:'unavailable'}
+  end
+
+  Note over Mirror: Borrow at Mirror after user login
+  Mirror->>Backend: POST /api/library/borrow-book {userId, bookId, sessionId}
+  Backend->>DB: SELECT reservation WHERE userId=&bookId AND status='pending' ORDER BY created_at LIMIT 1
+  alt reservation exists
+    Backend->>DB: UPDATE reservation status='fulfilled'
+  end
+  Backend->>DB: INSERT INTO borrow_records (userId, bookId, borrowed_at, due_date)
+  Backend->>DB: UPDATE books SET available_copies = available_copies - 1 WHERE id=bookId
+  Backend->>Notif: emit borrow notification
+  Backend->>Audit: insert 'borrow_book'
+  Backend-->>Mirror: 200 {borrowId}
+
+  Note over Mirror: Return at Mirror
+  Mirror->>Backend: POST /api/library/return-book {userId, bookId, sessionId}
+  Backend->>DB: SELECT borrow_records WHERE userId & bookId & status='borrowed' ORDER BY borrowed_at DESC LIMIT 1
+  alt found
+    Backend->>DB: UPDATE borrow_records SET status='returned', returned_at=NOW() WHERE id=borrowId
+    Backend->>DB: UPDATE books SET available_copies = available_copies + 1 WHERE id=bookId
+    Backend->>DB: compute overdue fines and write to fines table (if overdue)
+    Backend->>Notif: notify user & admins
+    Backend->>Audit: insert 'return_book'
+    Backend-->>Mirror: 200 {returned:true}
+  else not found
+    Backend-->>Mirror: 404 {error:'no active borrow'}
+  end
+
+%% ===== STUDENT DASHBOARD CLICK-PATH (PAGES → ENDPOINTS) =====
+flowchart LR
+  subgraph StudentDashboardMap["Student Dashboard — Click Path"]
+    NavS["Navbar (notifications, settings, logout)"]
+    SidebarS["Sidebar (menu)"]
+    Home["Home / Browse Books → /books, /dashboard"]
+    Register["Register → POST /api/students/register"]
+    LoginS["Login → /api/login (manual) or /api/library/login (QR)"]
+    ReserveS["Reserve → /api/library/reserve-book"]
+    BorrowS["Mirror Borrow → /api/library/borrow-book"]
+    ReturnS["Mirror Return → /api/library/return-book"]
+    ActivityS["Activity & History → /api/activity, /api/reports/*"]
+    AIAssistS["AI Assistant → /ai/chat"]
+  end
+
+  NavS --> Home
+  SidebarS --> Register
+  SidebarS --> LoginS
+  SidebarS --> ReserveS
+  SidebarS --> ActivityS
+  SidebarS --> AIAssistS
+

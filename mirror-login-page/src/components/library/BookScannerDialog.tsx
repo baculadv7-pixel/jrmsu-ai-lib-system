@@ -48,7 +48,9 @@ export function BookScannerDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
+      <DialogContent
+        className="w-[96vw] sm:w-auto sm:max-w-xl md:max-w-2xl lg:max-w-3xl max-h-[90vh] flex flex-col"
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-primary">
             <QrCode className="h-5 w-5" />
@@ -73,7 +75,7 @@ export function BookScannerDialog({
 
           {scanning && (
             <div className="space-y-4">
-              <div className="w-full rounded-xl border-2 border-primary/80 bg-black/80 p-2">
+              <div className="w-full max-w-[640px] mx-auto rounded-xl border-2 border-primary/80 bg-black/80 p-2 aspect-[4/3] flex items-center justify-center">
                 {/* Reuse the same advanced QR scanner used for login/logout */}
                 <QRScanner
                   containerId="book-qr-scanner-container"

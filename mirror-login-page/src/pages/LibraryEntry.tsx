@@ -402,8 +402,8 @@ const Login = () => {
   };
 
   return (
-    <div className="container mx-auto p-4">
-      <div className="grid grid-cols-12 gap-4">
+    <div className="container mx-auto p-4 max-w-6xl">
+      <div className="grid grid-cols-12 gap-4 items-start">
         {/* Left: Active Sessions */}
         <div className="col-span-12 lg:col-span-4 order-2 lg:order-1">
           <ActiveSessionsPanel 

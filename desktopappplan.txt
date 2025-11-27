@@ -1,0 +1,170 @@
+JRMSU AI-Library System
+Desktop App Plan (Electron-based wrapper)
+
+Goal
+- Package the existing web frontends (`jrmsu-wise-library-main` and `mirror-login-page`) as a Windows desktop app.
+- Re-use the current Python backend (`jrmsu-wise-library-main/python-backend`) and MySQL database without rewriting logic.
+- Keep the desktop app in sync with the web version by reusing the same built assets.
+
+High-level approach
+1) Use Electron as a thin shell that opens:
+   - The main React app (8080) as an embedded window.
+   - The mirror login page (8081) in a second BrowserWindow or route.
+2) Start/stop the Python backend from within the desktop app (or assume it is running as a service).
+3) Point all API calls to `http://localhost:5000` (unchanged).
+
+Directory structure proposal
+- Root: C:\Users\provu\Desktop\jrmsu-ai-lib-system-main
+  - jrmsu-wise-library-main/         (main web frontend + backend)
+  - mirror-login-page/               (mirror frontend)
+  - desktop-app/                     (NEW Electron project, reuses web source code)
+
+Key principle: REUSE web source code
+- The desktop app should NOT copy-paste React source. It should:
+  - Import built assets directly from `jrmsu-wise-library-main/dist` and `mirror-login-page/dist`, and
+  - When you change the web app source (`src/...`), rebuild with `npm run build` and the desktop app automatically picks up the new output.
+- Optionally, shared TypeScript utilities can be imported via relative paths from `desktop-app` into `jrmsu-wise-library-main/src` if you later introduce a shared package.
+
+Step 1: Create Electron project
+1. From the repo root, create a new folder:
+   # command from Warp
+   mkdir desktop-app
+
+2. Initialize a minimal Node project:
+   # command from Warp
+   cd desktop-app; npm init -y
+
+3. Install Electron and supporting tools:
+   # command from Warp
+   npm install --save-dev electron @electron/remote
+
+4. Configure `package.json` (desktop-app/package.json):
+   - Set main to `main.js`:
+     "main": "main.js",
+   - Add scripts:
+     "scripts": {
+       "start": "electron .",
+       "build": "echo 'Electron build step (use electron-builder or similar later)'"
+     }
+
+Step 2: Build the existing frontends (recycling web code)
+- Whenever you update the web React code in `jrmsu-wise-library-main/src` or `mirror-login-page/src`, you only need to rebuild; the Electron app always loads the latest `dist` outputs.
+
+1. Build main frontend:
+   # command from Warp
+   cd ..\jrmsu-wise-library-main; npm install; npm run build
+   - Output: `jrmsu-wise-library-main/dist`.
+
+2. Build mirror-login-page frontend:
+   # command from Warp
+   cd ..\mirror-login-page; npm install; npm run build
+   - Output: `mirror-login-page/dist`.
+
+Step 3: Electron main process (desktop-app/main.js)
+Create `desktop-app/main.js` with:
+- A BrowserWindow for the main app, loading the built `dist/index.html` from `jrmsu-wise-library-main`.
+- Optional: another BrowserWindow or in-app navigation for the mirror login page.
+- Basic app lifecycle handling.
+
+Example skeleton (pseudo-code):
+- NOTE: This shows structure only; actual code will be filled in later.
+
+  const { app, BrowserWindow } = require('electron');
+  const path = require('path');
+
+  function createMainWindow() {
+    const win = new BrowserWindow({
+      width: 1280,
+      height: 720,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+
+    // Load built React app
+    win.loadFile(path.join(__dirname, '..', 'jrmsu-wise-library-main', 'dist', 'index.html'));
+  }
+
+  app.whenReady().then(() => {
+    createMainWindow();
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    });
+  });
+
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+
+Step 4: Starting the backend from Electron (optional but recommended)
+You have helper scripts in `jrmsu-wise-library-main` to start the Python backend.
+Option A: User starts backend separately
+- User runs the existing PowerShell or batch script (e.g., `Start-All-Enforced.ps1` or `Start_all_system.bat`) before opening the desktop app.
+- Electron just assumes `http://localhost:5000` is available.
+
+Option B: Electron spawns backend on app start
+- In `main.js`, use `child_process.spawn` to run Python backend:
+
+  const { spawn } = require('child_process');
+  let backendProcess;
+
+  function startBackend() {
+    const backendPath = path.join(__dirname, '..', 'jrmsu-wise-library-main', 'python-backend');
+    backendProcess = spawn('python', ['app.py'], { cwd: backendPath, shell: true });
+
+    backendProcess.stdout.on('data', (data) => console.log('[backend]', data.toString()));
+    backendProcess.stderr.on('data', (data) => console.error('[backend]', data.toString()));
+  }
+
+  app.whenReady().then(() => {
+    startBackend();
+    createMainWindow();
+  });
+
+- On app quit, kill the backend process:
+
+  app.on('before-quit', () => {
+    if (backendProcess) backendProcess.kill();
+  });
+
+Step 5: Adding the mirror login page window
+- You can create a second BrowserWindow that loads `mirror-login-page/dist/index.html`.
+- Example: add a menu item or a button in the main React app that sends an IPC event to Electron to open the mirror window.
+- Minimal main-process function:
+
+  function createMirrorWindow() {
+    const win = new BrowserWindow({ width: 1024, height: 600 });
+    win.loadFile(path.join(__dirname, '..', 'mirror-login-page', 'dist', 'index.html'));
+  }
+
+- Wire it to an IPC handler (`ipcMain.handle('open-mirror')`) and call from React using `window.electron` bridge.
+
+Step 6: Packaging (later phase)
+- Once basic Electron wrapper works, you can introduce `electron-builder` for generating `.exe` installers:
+
+  # command from Warp
+  cd desktop-app; npm install --save-dev electron-builder
+
+  - Update scripts:
+    "scripts": {
+      "start": "electron .",
+      "dist": "electron-builder"
+    }
+
+- Configure `electron-builder` in `package.json` with app name, icon, etc.
+
+Important notes
+- All HTTP API calls from the existing React apps must still point to `http://localhost:5000`. Do not change API URLs unless you centralize them behind a config.
+- Make sure CORS is open enough (it is currently configured with `Access-Control-Allow-Origin` and `*` fallback in `python-backend/app.py`).
+- Socket.IO will continue to function over polling/HTTP as long as the backend is running.
+
+
+JRMSU AI-Library System
+Desktop App Implementation Checklist
+
+1) Verify `npm run build` works for both frontends, so the desktop app can recycle the same built React assets.  (command from Warp: `cd jrmsu-wise-library-main; npm run build` and `cd ..\mirror-login-page; npm run build`)
+2) Create `desktop-app` folder and initialize npm project.  (command from Warp: `mkdir desktop-app`)
+3) Install Electron dev dependency.  (command from Warp: `cd desktop-app; npm install --save-dev electron @electron/remote`)
+4) Add `main.js` and wire up BrowserWindow to `jrmsu-wise-library-main/dist/index.html` and `mirror-login-page/dist/index.html` so no React code is duplicated.
+5) Optionally wire an IPC channel so the web UI can tell Electron to open the mirror window, still using the same built HTML/JS from the web app.
+6) Implement backend auto-start via `child_process.spawn` (or keep using Start scripts manually).
+7) Test on Windows: run `npm start` in `desktop-app` (command from Warp: `cd desktop-app; npm start`).
+8) Add electron-builder config and create installer when ready.

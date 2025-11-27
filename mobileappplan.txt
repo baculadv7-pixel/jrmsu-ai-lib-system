@@ -1,0 +1,183 @@
+JRMSU AI-Library System
+Mobile App Plan (React Native + existing backend)
+
+Goal
+- Provide Android/iOS mobile apps for students/admins.
+- Reuse as much as possible of the existing logic and UI design.
+- Connect to the same Python backend + MySQL database via HTTP/Socket.IO.
+
+High-level approach
+1) Build a new React Native app for mobile (using Expo or bare React Native).
+2) Point the mobile app to the existing backend API (`http://<server>:5000/api/...`).
+3) Reuse business logic from the web frontends where feasible (validation, DTOs, endpoints).
+4) Implement QR login, notifications, and basic dashboard flows tailored for mobile.
+
+Directory structure proposal
+- Root: C:\Users\provu\Desktop\jrmsu-ai-lib-system-main
+  - jrmsu-wise-library-main/        (existing web frontend + backend)
+  - mirror-login-page/              (existing mirror web frontend)
+  - mobile-app/                     (NEW React Native project, reuses web services/logic)
+
+Key principle: REUSE web source code
+- Mobile app should not re-invent business rules. It should:
+  - Call the SAME backend endpoints as the web app.
+  - Reuse TypeScript helpers (ID validation, QR payload parsing, types) by copying them into a shared folder or referencing them directly.
+- Later you can extract shared modules (e.g., `shared/` folder) that both web and mobile import.
+
+Step 1: Choose React Native stack (Expo recommended)
+- Expo simplifies Android device testing and bundling.
+
+1. Install Expo CLI globally (once):
+   # command from Warp
+   npm install -g expo-cli
+
+2. Create new Expo app in `mobile-app`:
+   # command from Warp
+   cd C:\Users\provu\Desktop\jrmsu-ai-lib-system-main
+   expo init mobile-app
+   - Choose TypeScript template (e.g., "blank (TypeScript)").
+
+Step 2: Configure API base URL to existing backend
+1. In `mobile-app`, create a config file `src/config/api.ts` similar to web app:
+
+   export const API = {
+     BACKEND_BASE: __DEV__ ? 'http://192.168.x.x:5000' : 'https://your-server-domain:5000',
+   };
+
+   - Replace `192.168.x.x` with the LAN IP of the machine running the backend.
+   - Use the same endpoints as in the web app (e.g., `/api/auth/login`, `/api/students/...`, `/api/library/...`).
+
+2. Ensure CORS and any IP restrictions in `python-backend/app.py` allow mobile clients from the LAN/WAN.
+
+Step 3: Implement core screens
+Prioritize a small set of mobile screens:
+- Login & QR login
+- Library entry / active session indicator
+- Simple dashboard (current borrows, overdue status)
+- Notifications list
+
+Example screen mapping:
+- `screens/LoginScreen.tsx`   -> reuses validation logic from web `Login.tsx`.
+- `screens/LibraryEntryScreen.tsx` -> mirrors `mirror-login-page` but mobile-friendly.
+- `screens/NotificationsScreen.tsx` -> uses `/api/notifications` endpoints.
+
+Use React Navigation:
+- Install navigation libraries:
+  # command from Warp
+  cd mobile-app
+  npm install @react-navigation/native @react-navigation/native-stack
+  npx expo install react-native-screens react-native-safe-area-context
+
+Define basic navigation stack (pseudo-code):
+
+  const Stack = createNativeStackNavigator();
+
+  export function AppNavigator() {
+    return (
+      <NavigationContainer>
+        <Stack.Navigator>
+          <Stack.Screen name="Login" component={LoginScreen} />
+          <Stack.Screen name="Dashboard" component={DashboardScreen} />
+          <Stack.Screen name="LibraryEntry" component={LibraryEntryScreen} />
+          <Stack.Screen name="Notifications" component={NotificationsScreen} />
+        </Stack.Navigator>
+      </NavigationContainer>
+    );
+  }
+
+Step 4: Reuse business logic from web (recycle code)
+1. Copy over shared TypeScript types and validation from `jrmsu-wise-library-main/src/services` where it makes sense:
+   - `database.ts` (authentication schemas, ID formats)
+   - `overdueNotifications` types
+   - Simple helpers (ID regex validation, formatting).
+
+   # command from Warp (example copy of helpers into a shared folder)
+   cd C:\Users\provu\Desktop\jrmsu-ai-lib-system-main
+   mkdir shared
+   copy jrmsu-wise-library-main\src\services\database.ts shared\database.ts
+   copy jrmsu-wise-library-main\src\services\overdueNotifications.ts shared\overdueNotifications.ts
+
+2. In `mobile-app`, reference those shared files instead of duplicating logic:
+   - Either copy from `shared/` into `mobile-app/src/services` as part of your workflow, or
+   - Use a relative import path like `../../shared/database` if your TS config allows it.
+
+3. For each API call used on web, create a matching function in mobile that hits the SAME backend endpoints:
+   - `login(id, password, role)` -> POST `/api/auth/login`.
+   - `getNotifications(userId)` -> GET `/api/notifications`.
+   - `startLibrarySession(userId)` -> POST `/api/library/login`.
+
+Step 5: QR login on mobile
+1. Use Expo's Camera and QR scanning APIs:
+   # command from Warp
+   cd mobile-app
+   npx expo install expo-camera expo-barcode-scanner
+
+2. Create `components/QRScanner.tsx` for mobile:
+   - Request camera permission.
+   - Render full-screen camera preview.
+   - Listen for QR scan events and parse JSON payloads like the web QR scanner.
+
+3. Reuse the same QR payload structure:
+   - For user QR: `{ fullName, userId, userType, systemId, systemTag, sessionToken, ... }`.
+   - For book QR: `{ t: 'BOOK', id, title, author, category, isbn }`.
+
+4. Upon successful scan, call the same auth/login logic used in `QRCodeLogin.tsx` (ported to mobile).
+
+Step 6: Notifications
+1. Mobile can initially just call `/api/notifications` via HTTP and display a list.
+2. Later, add realtime via Socket.IO client (already used on web) if desired:
+   - Install socket.io-client:
+     # command from Warp
+     cd mobile-app
+     npm install socket.io-client
+
+   - Use polling or websocket depending on backend compatibility.
+
+3. For push notifications (optional later step), integrate Expo Notifications and have backend call Expo push API.
+
+Step 7: Library session flows
+1. Implement minimal library entry/logout flows mapped to backend endpoints:
+   - `/api/library/login`
+   - `/api/library/logout`
+   - `/api/library/user-status/:userId`
+   - `/api/library/borrow-book`, `/api/library/return-book`
+
+2. Use simpler UIs than the web mirror page; focus on:
+   - Show whether user is currently inside library.
+   - Show list of current borrowed/reserved books.
+   - Buttons to trigger QR scanner for borrow/return.
+
+Step 8: Testing on Android
+1. Start backend and database as normal on your PC.
+2. Run Expo dev server:
+   # command from Warp
+   cd mobile-app
+   npm start
+
+3. Use Expo Go on an Android phone:
+   - Connect phone and PC to same Wi-Fi.
+   - Scan the QR code from terminal/Expo Dev Tools.
+   - App loads and calls backend at `http://192.168.x.x:5000`.
+
+Step 9: Building a production APK/AAB
+1. Configure app.json / app.config.js with name, slug, icon, etc.
+2. Use Expo EAS build or classic build:
+   # command from Warp
+   cd mobile-app
+   npx expo build:android
+
+3. Upload the generated AAB/APK to Play Store or sideload on target devices.
+
+
+JRMSU AI-Library System
+Mobile App Implementation Checklist
+
+1) Decide Expo vs bare React Native (recommend Expo to start).
+2) Create `mobile-app` using Expo template.  (command from Warp: `expo init mobile-app`)
+3) Add `API` config that points to the existing backend host/port.
+4) Implement `LoginScreen` and `DashboardScreen` that call the same auth endpoints as the web app.
+5) Implement `LibraryEntryScreen` and QR scanner using `expo-camera` / `expo-barcode-scanner`.  (command from Warp: `npx expo install expo-camera expo-barcode-scanner`)
+6) Add React Navigation stack for Login -> Dashboard -> LibraryEntry -> Notifications.  (command from Warp: `npm install @react-navigation/native @react-navigation/native-stack`)
+7) Copy and adapt shared TypeScript helpers from web `src/services` into a shared folder and import them in mobile so business rules stay in ONE place.  (command from Warp example: `mkdir shared; copy jrmsu-wise-library-main\src\services\database.ts shared\database.ts`)
+8) Test on Android via Expo Go while backend is running on PC.
+9) When stable, build release artifacts (APK/AAB) using `npx expo build:android` or EAS.  (command from Warp: `cd mobile-app; npx expo build:android`)

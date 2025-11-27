@@ -1,0 +1,137 @@
+%% Mirror page flowchart + sequences — mirror-login-page (Kiosk)
+%% File: flowchartmirrorpage.mmd
+
+flowchart TD
+  subgraph MirrorOverview["Mirror / Kiosk (LibraryEntry) — High level"]
+    MStart((Visitor Arrives))
+    ChooseMethod["Choose method: Manual / QR"]
+    ManualLogin["Manual Login\nPOST /api/admins/login or /api/students/login (sign in)"]
+    QRLogin["QR Login\nClient decode -> POST /api/library/login (qr payload)"]
+    CreateSession["Create Library Session\nPOST /api/library/login / LSessionMgr creates session (action_count odd)"]
+    CheckStatus["CheckUserStatus -> GET /api/library/user-status/{userId}"]
+    PickupPrompt["Book Pickup Prompt (if reservations)"]
+    ReturnPrompt["Return Prompt (if borrowed books)"]
+    Scanner["Book Scanner -> borrow/return endpoints\nPOST /api/library/borrow-book | /api/library/return-book"]
+    LogoutFlow["Logout (manual or from dashboard) -> POST /api/library/logout (action_count even)"]
+    ActiveSessions["ActiveSessionsPanel (admin)\nGET /api/library/active-sessions, WS events: session_update"]
+  end
+
+  MStart --> ChooseMethod
+  ChooseMethod --> ManualLogin
+  ChooseMethod --> QRLogin
+  ManualLogin --> CreateSession
+  QRLogin --> CreateSession
+  CreateSession --> CheckStatus
+  CheckStatus -->|reservations| PickupPrompt
+  CheckStatus -->|borrowed| ReturnPrompt
+  PickupPrompt --> Scanner
+  ReturnPrompt --> Scanner
+  Scanner --> CreateSession
+  CreateSession --> LogoutFlow
+  ActiveSessions -->|force-logout| LogoutFlow
+
+\n%% ===== Mirror sequence — login, session creation, dialogs, scanner, logout =====
+sequenceDiagram
+  participant UserBrowser as "Mirror Browser / UI (LibraryEntry)"
+  participant QRClient as "Client QR Decoder (browser)"
+  participant MirrorBackend as "Flask Backend (Library endpoints)"
+  participant LSM as "Library Session Manager (library_session_manager)"
+  participant DB as "DB: library_sessions + students/admins + reservations + borrow_records"
+  participant Socket as "Socket.IO (session_update, session_cleanup)"
+  participant Notif as "Notification Service (notify_all_admins)"
+
+  Note over UserBrowser: User chooses login method (Manual or QR)
+  alt Manual login
+    UserBrowser->>MirrorBackend: POST /api/login (id + password)
+    MirrorBackend->>DB: SELECT user by id
+    alt found & password ok
+      MirrorBackend->>MirrorBackend: check 2FA -> if enabled, require TOTP
+      MirrorBackend-->>UserBrowser: 200 OK (auth success)
+      UserBrowser->>LSM: POST /api/library/login (create session) or createSession() call
+    else auth fail
+      MirrorBackend-->>UserBrowser: 401 Unauthorized
+    end
+  else QR login
+    QRClient->>UserBrowser: decode QR -> payload
+    UserBrowser->>MirrorBackend: POST /api/library/login {qrPayload}
+    MirrorBackend->>DB: validate qr payload -> find user record
+    alt valid
+      MirrorBackend->>LSM: create_login_session(userId) -> library_sessions row (action_count odd)
+      LSM-->>MirrorBackend: {sessionId, status: active}
+      MirrorBackend-->>UserBrowser: 200 {sessionId}
+    else invalid
+      MirrorBackend-->>UserBrowser: 401 / 400
+    end
+  end
+
+  Note over UserBrowser,LSM: After createSession, middleware calls checkUserStatus
+  UserBrowser->>MirrorBackend: GET /api/library/user-status/{userId}
+  MirrorBackend->>DB: SELECT reservations where userId and borrow_records
+  DB-->>MirrorBackend: {reservedBooks, borrowedBooks, flags}
+  MirrorBackend-->>UserBrowser: 200 {hasReservations, hasBorrowedBooks, reservedBooks, borrowedBooks}
+
+  alt has reservations
+    UserBrowser->>UserBrowser: Show BookPickupDialog (Lists reserved books)
+    UserBrowser-->>UserAction: If user chooses "Yes" -> open BookScannerDialog (mode=borrow)
+  end
+  alt has borrowed books
+    UserBrowser->>UserBrowser: Show BookReturnDialog (Lists borrowed books)
+    UserBrowser-->>UserAction: If user chooses "Yes" -> open BookScannerDialog (mode=return)
+  end
+
+  Note over BookScannerDialog: User scans Book QR -> UI calls backend
+  UserBrowser->>MirrorBackend: POST /api/library/borrow-book {userId, bookId, sessionId} or /return-book
+  MirrorBackend->>DB: verify reservation or borrow record; INSERT/UPDATE borrow_records; update books.available_copies
+  alt borrow succeeded
+    DB-->>MirrorBackend: {borrowId}
+    MirrorBackend->>Notif: notify_all_admins(book_borrowed)
+    MirrorBackend->>Socket: emit 'book.borrowed' to dashboard
+    MirrorBackend-->>UserBrowser: 200 {borrowId}
+  else return succeeded
+    DB-->>MirrorBackend: {ok:true}
+    MirrorBackend->>Notif: notify_all_admins(book_returned)
+    MirrorBackend->>Socket: emit 'book.returned'
+    MirrorBackend-->>UserBrowser: 200 {ok:true}
+  else error
+    MirrorBackend-->>UserBrowser: 4xx/5xx error
+  end
+
+  Note over UserBrowser: Logout flow initiated (logout button)
+  UserBrowser->>MirrorBackend: POST /api/library/logout {userId}
+  MirrorBackend->>LSM: create_logout_session(userId) -> action_count even
+  LSM->>DB: UPDATE library_sessions status='logged_out', action_count++
+  LSM-->>MirrorBackend: {ok:true}
+  MirrorBackend->>Socket: emit 'session_update' {userId, status:'logged_out'}
+  MirrorBackend->>Notif: notify_all_admins('logout' or 'return_time_activated' if scan)
+  MirrorBackend-->>UserBrowser: 200 OK (goodbye)
+
+  Note over Socket,UserBrowser: Socket events - session_update & session_cleanup
+  Socket->>UserBrowser: 'session_update' events (real-time refresh on UI)
+  Socket->>UserBrowser: 'session_cleanup' (maintenance/restart overlay)
+
+\n%% ===== Mirror Active Sessions & Admin Tools =====
+flowchart LR
+  subgraph MirrorAdminMonitor["Mirror — Admin & Monitor interactions"]
+    AActivePanel["Active Sessions Panel\n(GET /api/library/active-sessions)"]
+    ForceLogout["Force Logout (Admin action)\nPOST /api/library/force-logout {userId}"]
+    RealTime["Socket.IO: session_update, session_cleanup"]
+    Notifications["Admin Notifications\nvia notify_all_admins"]
+  end
+
+  AActivePanel --> ForceLogout
+  ForceLogout --> RealTime
+  RealTime --> AActivePanel
+  Notifications --> AActivePanel
+
+\n%% Legend
+classDef ui fill:#BFDBFE,stroke:#1e3a8a,color:#083344
+classDef backend fill:#D6BCFA,stroke:#6b21a8,color:#4c1d95
+classDef db fill:#D1FAE5,stroke:#065f46,color:#064e3b
+classDef realtime fill:#FFDAB9,stroke:#b45309,color:#92400e
+
+class UserBrowser,QRClient ui
+class MirrorBackend,LSM backend
+class DB db
+class Socket realtime
+
+%% End of mirror flowchart

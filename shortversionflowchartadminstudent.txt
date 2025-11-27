@@ -1,0 +1,42 @@
+flowchart TD
+  %% Short combined flow for Admin & Student
+
+  UserStudent[Student]
+  UserAdmin[Admin]
+
+  subgraph MainApp[Main Web App]
+    LoginPage[Login / QR Login / Registration]
+    StudentDash[Student Views<br/>Books, Borrow/Return, History]
+    AdminDash[Admin Views<br/>Dashboard, Inventory, Management]
+  end
+
+  subgraph Backend[Python Backend]
+    AuthAPI[Auth & Users<br/>/api/students, /api/admins, /api/users]
+    LibraryAPI[Library Ops<br/>/api/library/*]
+  end
+
+  subgraph DB[jrmsu_library DB]
+    DBStudents[(students)]
+    DBAdmins[(admins)]
+    DBBooks[(books, reservations, borrow_records)]
+  end
+
+  %% Login + registration
+  UserStudent --> LoginPage
+  UserAdmin --> LoginPage
+
+  LoginPage --> AuthAPI
+  AuthAPI --> DBStudents
+  AuthAPI --> DBAdmins
+
+  %% Routes after login
+  AuthAPI -->|role=student| StudentDash
+  AuthAPI -->|role=admin| AdminDash
+
+  %% Student library actions
+  StudentDash -->|reserve / borrow / return| LibraryAPI
+
+  %% Admin management actions
+  AdminDash -->|manage books & users| LibraryAPI
+
+  LibraryAPI --> DBBooks

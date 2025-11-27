@@ -1,0 +1,48 @@
+flowchart TD
+  %% High-level JRMSU AI-Library System flow
+
+  User[User<br/>(Student / Admin)]
+  JRMSU[(JRMSU AI-Library System)]
+
+  subgraph MainApp[Main Web App (8080)]
+    MainLogin[Login & Registration<br/>Dashboard, Books, Management]
+  end
+
+  subgraph MirrorApp[Mirror Login Page (8081)]
+    MirrorLogin[Library Entry/Exit UI<br/>QR Login + Borrow/Return]
+  end
+
+  subgraph Backend[Python Backend (5000)]
+    API[Flask API<br/>Auth, Library, Notifications]
+    LibSessions[/Library Session Endpoints<br/>/api/library/*/]
+  end
+
+  subgraph AIServer[AI Server (5002)]
+    AIAPI[AI Assistant API<br/>/ai/chat, /ai/search]
+  end
+
+  subgraph DB[Databases]
+    DBMain[(jrmsu_library DB<br/>students, admins, books,<br/>borrow_records, reservations,<br/>library_sessions, notifications,<br/>activity_log)]
+    DBAI[(library_system_ai DB<br/>ai_logs)]
+  end
+
+  %% User entry
+  User --> JRMSU
+  JRMSU --> MainLogin
+  JRMSU --> MirrorLogin
+
+  %% Main app flows
+  MainLogin -->|HTTP /api/...| API
+  MainLogin -->|AI requests| AIAPI
+
+  %% Mirror page flows (physical library gate)
+  MirrorLogin -->|HTTP /api/...| API
+  MirrorLogin -->|Create/close library sessions| LibSessions
+
+  %% Backend to DB
+  API --> DBMain
+  LibSessions --> DBMain
+
+  %% AI server to DB
+  AIAPI --> DBMain
+  AIAPI --> DBAI

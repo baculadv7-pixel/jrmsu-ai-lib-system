@@ -1,0 +1,267 @@
+JRMSU AI Library System — Full Text Flowchart (Complete)
+=======================================================
+
+Introduction
+------------
+This is a complete, text-based flowchart that describes the architecture and the longest realistic flows
+for the JRMSU AI Library System in this repository. Use this as the canonical system sequence reference and
+as the source of truth for integration tests, diagrams, and documentation.
+
+System Components (summary)
+---------------------------
+1) Frontends
+   - Main app: jrmsu-wise-library-main (React + TypeScript)
+   - Mirror/kiosk app: mirror-login-page (React + TypeScript)
+   - Browser clients connect to: backend (HTTP + Socket.IO) and AI server
+
+2) Python Backends
+   - Primary: jrmsu-wise-library-main/python-backend (Flask, port 5000)
+   - AI server: ai_server/app.py (Flask, port 5002) — calls Ollama / LLaMA via subprocess
+   - Utility scripts: top-level /python-backend/generate_qr_with_logo.py
+
+3) Datastores
+   - Primary: MySQL / MariaDB (database: jrmsu_library)
+   - Dev fallback: file-backed data.json (python-backend)
+   - Backup store: backupdb folder (.json.gz), db_backups metadata table
+
+4) Realtime/Events
+   - Flask-SocketIO (backend) emits events:
+       * notification.new, audit:new, session_update, students.updated, reservations updates etc.
+
+5) Optional Services
+   - Ollama LLM on port 11434 (used by ai_server via `ollama` CLI)
+
+
+Top-level Environment & Ports (dev defaults)
+-------------------------------------------
+ - Frontend (main): http://localhost:8080
+ - Mirror (kiosk): http://localhost:8081
+ - Backend (Flask): http://localhost:5000
+ - AI Server (Jose): http://localhost:5002
+ - Ollama (LLaMA inference): http://localhost:11434
+
+
+Long-form Flow Sequences (end-to-end)
+------------------------------------
+
+FLOW A — Full user lifecycle: Register -> Login -> Reserve -> Borrow (mirror) -> Return
+---------------------------------------------------------------------------
+
+ Actors: Student, Frontend (main), Mirror (kiosk), Backend (Flask), MySQL, Socket.IO, Admins
+
+ 1) Student registration (Frontend -> Backend)
+    - Client sends POST /api/students/register with student details and plaintext password.
+    - Backend (app.py) receives payload and computes bcrypt password_hash.
+    - If MySQL available: StudentDB.register_student() (stored proc sp_register_student) is called.
+        * On proc success: stored row returned.
+        * On failure (duplicate, validation), proper error returned.
+    - If MySQL unavailable: fallback to file-backed data.json and return a minimal record.
+    - write_audit_log('student_register') records the event (DB or file-backed) and broadcasts via Socket.IO.
+
+ 2) Student login (Manual on Main or QR at Mirror)
+    Manual (Main site):
+     - Client posts credentials; backend verifies password against stored bcrypt hash.
+     - On success: session returned; if twoFactorEnabled -> server prompts for TOTP.
+     - If login is to create a library session (manual login that marks entry): createSession -> library_session_manager.create_login_session
+       * Creates library_sessions row with an odd action_count (ODD pattern for login).
+       * Mirrors active session into active_sessions for fast queries.
+       * Emits notifications and activity logs.
+
+    QR Login (Mirror):
+     - Camera sees QR, client decodes to payload (systemId,userId,fullName,userType, tokens)
+     - Mirror sends /api/library/login or dev login POST with that payload.
+     - Backend validates format (qr_detector / API checks) and calls create_login_session.
+     - On success: session created, notifications generated, and admins updated via Socket.IO.
+
+ 3) Reservation (Main site)
+    - Student presses Reserve on a book (frontend -> POST /api/library/reserve-book).
+    - Backend checks book.available_copies and status.
+    - Creates row in reservations table (id/reservation_id) and MAY decrement available_copies.
+    - NotificationsService.notify_all_admins called to inform admins of a new reservation.
+
+ 4) Borrowing using Mirror QR (activation of reserved/book borrowing)
+    - Mirror scans user + book QR codes and calls POST /api/library/borrow-book.
+    - Backend checks for existing reservation by that user for that book.
+        - If reservation exists: mark reservation as fulfilled and create borrow_records row.
+        - If no reservation: if available_copies>0 -> create borrow_records row.
+    - On borrow creation:
+        * compute due_date (BorrowingRulesService logic, may be client-side for mirror)
+        * decrement book.available_copies (GREATEST(...,0) to prevent negatives)
+        * write_audit_log('book_borrowed'), send notifications/app events
+
+ 5) Return via Mirror QR
+    - Mirror scans user + book and POSTs /api/library/return-book
+    - Backend finds latest borrow_records row (status='borrowed', returned_at=NULL)
+    - Update it to status='returned', set returned_at = NOW()
+    - Increment available_copies and set status 'available'
+    - Compute overdue logic and fines if configured; notify user & admins
+
+
+FLOW B — Administration & Backup
+-------------------------------
+
+ 1) System admin creates backups (POST /api/backup/create) — requires adminId + adminPassword
+     - Creates a file-backed gzip of data.json and logs metadata to db_backups table (if MySQL available)
+     - write_audit_log('backup_created') and broadcast 'backup:created' notification
+
+ 2) Restore (POST /api/backup/restore)
+     - Requires confirmation phrase 'RESTORE NOW' for safety
+     - Restores file-backed DB by unpacking .json.gz into data.json
+     - write_audit_log('backup_restored') and emit notifications
+
+ 3) Export audit logs (GET/POST /api/audit/export)
+     - Reads audit_log from MySQL or file-backed audit; builds CSV or XLSX (if openpyxl available)
+
+
+FLOW C — Notifications & Activity
+---------------------------------
+
+ 1) NotificationsService.create_notification
+     - Generates an ID -> pulls Jose AI template from jose_message_templates (if present) using JoseAI.generate_message
+     - Inserts notification row into notifications table (or DB fallback mechanisms)
+     - Uses Socket.IO to emit notification.new to role rooms or user rooms
+
+ 2) Activity logging (NotificationsService.create_activity_log / write_audit_log)
+     - Writes entries into activity_log / audit_log (MySQL or file). Admins use these for monitoring and audit.
+
+
+FLOW D — AI assistant (Jose / LLM interactions)
+-----------------------------------------------
+
+ 1) /ai/chat receives user prompt
+ 2) ai_server.run_llama composes full prompt with:
+      - JOSE_SYSTEM_PROMPT (persona and shortness constraints)
+      - system knowledge excerpt from system_knowledge.json via get_relevant_knowledge
+      - optional book context fetched from backend `/api/ai/book-context` (best-effort)
+ 3) run_llama shells out to `ollama run llama3:8b-instruct-q4_K_M` sending prompt via stdin
+ 4) ai_server returns model stdout; optionally logs to DB
+ 5) Client receives compact, system-focused response
+
+
+ERROR CASES & FALLBACKS — defensive behaviors
+----------------------------------------------
+ - MySQL down -> Fall back to `data.json`, maintain most critical flows (register & sessions still work in dev)
+ - Email delivery disabled -> backend prints reset code to console with dev message
+ - Missing optional packages (openpyxl, TextBlob) degrade features gracefully (CSV vs XLSX; sentiment heuristics)
+ - Many DB operations included defensive queries (try stored procedure, catch Unknown column errors -> fallback)
+
+
+NOTES FOR TESTING / VALIDATION
+-----------------------------
+  - Start the system in dev: backend on 5000, mirror on 8081, main frontend 8080, AI server 5002, Ollama if AI features required on 11434.
+  - Skip MySQL to confirm data.json fallback behavior and ensure activity/audit writes are present.
+  - Validate flows using Postman or an integrated test harness:
+      * /api/students/register -> login -> /api/library/reserve-book -> mirror /api/library/borrow-book -> /api/library/return-book
+      * /api/notifications create/mark-read flows
+      * AI: POST /ai/chat with a prompt; ensure Ollama running or gracefully handle unreachable model
+
+
+Deployment Considerations
+-------------------------
+  - Secure DB credentials and use least privilege accounts
+  - Harden CORS to allowed origins (replace wildcard *)
+  - Add authentication tokens and/or session-based checks on admin endpoints
+  - Add MySQL dump backup/restore steps for full DB-level backup (the current backup is file-backed, not a MySQL dump)
+  - Add TLS termination to frontends & ensure secure contexts for camera access (HTTPS required in browsers)
+
+
+End of flowchart — full traversal of system flows present in repository
+--------------------------------------------------------------------
+
+If you’d like this converted into a diagram (Mermaid or draw.io) I can generate that automatically from this text.
+
+
+
+flowchart TD
+
+%% USERS
+UStudent["Student User"]
+UAdmin["Admin User"]
+
+%% MAIN FRONTEND
+subgraph MainApp["Main Web App (React + TypeScript)"]
+    LLogin["Login & Registration"]
+    BBooks["Books Page"]
+    BManage["Book Management"]
+    DDash["Admin Dashboard"]
+    NBell["Notification Bell"]
+    AIAssist["AI Assistant"]
+end
+
+%% MIRROR FRONTEND
+subgraph Mirror["Mirror Login Page"]
+    MEntry["Library Entry & Exit"]
+    MScanner["QR Borrow/Return Scanner"]
+    MSessions["Active Sessions Panel"]
+end
+
+%% PYTHON BACKEND
+subgraph Backend["Python Backend (Flask + Socket.IO)"]
+    AuthRoutes["Auth API"]
+    LEndpoints["Library Endpoints"]
+    LSessionMgr["Library Session Manager"]
+    NRoutes["Notification Routes"]
+    NService["Notification Service"]
+end
+
+%% DATABASES
+DBMain["MySQL: jrmsu_library"]
+DBFile["data.json (User + Activity Backup)"]
+
+%% AI SERVER
+subgraph AIServer["AI Server (Flask + Ollama)"]
+    AIHTTP["/ai/chat"]
+    AIKB["system_knowledge.json"]
+    AIDBAI["AI Logs (MySQL)"]
+end
+
+%% USER -> MAIN APP
+UStudent --> LLogin
+UAdmin --> LLogin
+
+LLogin --> AuthRoutes
+AuthRoutes --> DBMain
+AuthRoutes --> DBFile
+
+%% BOOKS & RESERVATIONS
+UStudent --> BBooks
+UAdmin --> BBooks
+BBooks --> LEndpoints
+LEndpoints --> DBMain
+LEndpoints --> NService
+
+%% NOTIFICATIONS
+NService --> DBMain
+NRoutes --> DBMain
+NBell --> NRoutes
+
+%% DASHBOARD
+DDash --> NRoutes
+
+%% MIRROR SESSION SYSTEM
+UStudent --> MEntry
+UAdmin --> MEntry
+MEntry --> AuthRoutes
+MEntry --> LSessionMgr
+LSessionMgr --> DBMain
+LSessionMgr --> NService
+
+MSessions --> LSessionMgr
+
+%% QR BORROW / RETURN
+MEntry --> MScanner
+MScanner --> LEndpoints
+LEndpoints --> DBMain
+LEndpoints --> NService
+
+%% LOGOUT
+MEntry --> LSessionMgr
+
+%% AI ASSISTANT FLOW
+UStudent --> AIAssist
+UAdmin --> AIAssist
+
+AIAssist --> AIHTTP
+AIHTTP --> AIKB
+AIHTTP --> AIDBAI
+

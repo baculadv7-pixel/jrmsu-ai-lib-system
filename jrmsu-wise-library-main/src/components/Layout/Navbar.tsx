@@ -186,7 +186,9 @@ const Navbar = ({ userType, theme = "system", onThemeChange }: NavbarProps) => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center gap-3">
-            <img src={logo} alt="JRMSU" className="h-10 w-10 object-contain rounded-md bg-navy" />
+            <div className="h-10 w-10 rounded-full overflow-hidden border-2 border-navy bg-navy flex items-center justify-center">
+              <img src={logo} alt="JRMSU" className="h-full w-full object-cover" />
+            </div>
             <div className="text-navy-foreground">
               <h1 className="text-lg font-bold">JRMSU Library</h1>
               <p className="text-xs text-secondary">AI-Powered System</p>

@@ -1,0 +1,230 @@
+flowchart TD
+  %% ==========================
+  %% BRAND & CONTEXT
+  %% ==========================
+  JRMSU[(JRMSU Logo\nJRMSU AI-Library System\nJose Rizal Memorial State University)]
+
+  %% ==========================
+  %% ENTRY POINTS (MAIN + MIRROR)
+  %% ==========================
+  subgraph Entry[Student Entry Points]
+    LManual["Manual Login (Student)\nMain Web App /login"]
+    LQR["QR Code Login (Student)\nMain Web App - QR Login"]
+    LMirror["Mirror Page Login (Student)\nmirror-login-page / (LibraryEntry)"]
+  end
+
+  JRMSU --> LManual
+  JRMSU --> LQR
+  JRMSU --> LMirror
+
+  %% ==========================
+  %% AUTH & 2FA (STUDENT – MAIN APP)
+  %% ==========================
+  subgraph AuthMain[Auth & 2FA – Student (Main App)]
+    Creds["Enter Student ID + Password\nStudent ID format: KC-23-A-00243\nExample invalid: KC-L-00000 → error"]
+    TwoFAState{"Is 2FA enabled for this student?"}
+    TwoFADialog["Two-Factor Authentication Dialog\nEnter 6-digit code from Google Authenticator\n(2FA Code: 123456 in example)"]
+    LoginSuccess["Login Success → Student Dashboard"]
+    LoginError["Invalid credentials / ID format / 2FA code"]
+  end
+
+  LManual --> Creds --> TwoFAState
+  TwoFAState -- "2FA Disabled" --> LoginSuccess
+  TwoFAState -- "2FA Enabled" --> TwoFADialog -->|Valid 2FA| LoginSuccess
+  TwoFADialog -->|Invalid / Cancel| LoginError
+  Creds -->|Invalid ID format or wrong password| LoginError
+
+  %% QR login (main app) – detects student vs admin based on QR payload
+  subgraph QRMain[QR Login – Main App]
+    QRScan["Scan JRMSU QR Code\n(systemId: JRMSU-LIBRARY, payload from DB)"]
+    QRDetect{Detect role from QR payload\n(student vs admin)}
+  end
+
+  LQR --> QRScan --> QRDetect
+  QRDetect -- "Student QR" --> LoginSuccess
+  QRDetect -- "Admin QR" -->|Route to admin dashboard| LoginSuccess
+
+  %% ==========================
+  %% REGISTRATION – STUDENT (4 PHASES)
+  %% ==========================
+  subgraph Reg4[Student Registration – 4 Phases]
+    RegLink["Don’t have an account? Register here"]
+
+    subgraph Phase1[Phase 1 of 4 – Choose Account Type (25%)]
+      P1Choice["Select account type:\n- Register as Student\n- Register as Admin"]
+    end
+
+    subgraph Phase2[Phase 2 of 4 – Personal Info (50%)]
+      P2Form["Collect Personal Info:\nFirst/Middle/Last/Suffix\nAge, Birthdate, Gender\nEmail, Phone\nPermanent & Current Address\n(Region, Province, City, Barangay, Street, Zip, Landmark)"]
+    end
+
+    subgraph Phase3[Phase 3 of 4 – Student / Institutional Info (75%)]
+      P3Form["Educational / Institutional Info:\nStudent ID * (KC-23-A-00762 pattern)\n(KATIPUNAN CAMPUS – SCHOOLYEAR – BLOCK – STUDENT ID)\nCollege Department\nCourse / Major (e.g., BSBA – HR Management)\nYear Level (e.g., 2nd Year)"]
+    end
+
+    subgraph Phase4[Phase 4 of 4 – Security & Account Setup (100%)]
+      P4Form["Security & Account Setup:\nPassword + Confirm Password\n(>=8 chars, 1 uppercase, 1 number)\nOn success → Automatic QR Code Generation"]
+      P4QR["Automatic QR Generation:\nContains profile info, Student ID,\nencrypted auth key, system login token,\nSystem Tags (e.g., JRMSU-KCS for campus)"]
+    end
+  end
+
+  LoginError --> RegLink
+  RegLink --> P1Choice --> P2Form --> P3Form --> P4Form --> P4QR --> LoginSuccess
+
+  %% ==========================
+  %% BACKEND AUTH & DB PERSISTENCE (STUDENT)
+  %% ==========================
+  subgraph BackendAuth[Python Backend – Auth & Student DB]
+    AuthAPI["/api/students/*, /api/users/*\nValidate student ID, password (bcrypt)\nHandle registration, profile, 2FA flags"]
+  end
+
+  subgraph DBAuth[DB – Auth & Identity]
+    DBStudents[("students" table\nstudent_id KC-..\nname, course, year, contact, 2fa_secret, 2fa_enabled, qr_payload)]
+    DBAdmins[("admins" table\nfor admin flows; not primary here)]
+  end
+
+  Creds --> AuthAPI --> DBStudents
+  QRScan --> AuthAPI
+  Reg4 --> AuthAPI --> DBStudents
+
+  %% ==========================
+  %% MIRROR PAGE – STUDENT ENTRY/EXIT (LIBRARY SESSIONS)
+  %% ==========================
+  subgraph Mirror[Mirror Login Page – Library Entry/Exit]
+    MLogin["Mirror Login UI (Student)\nManual ID/Password or QR"]
+    MAuth["Auth via AuthContext (student rules)\nBackend auth /api/students, /api/users"]
+    MCreateSession["createSession(studentId, 'student', fullName, method)\n→ POST /api/library/login"]
+    MCheckStatus["checkUserStatus(studentId)\n→ /api/library/user-status/{id}\nReserved / Borrowed books"]
+    MBorrowReturn["Borrow/Return via QR at mirror:\n- borrowBook(bookId)\n- returnBook(bookId)\n- optional activateReturnTime on logout"]
+    MLogoutFlow["Logout flow:\ncheckUserStatus → if reserved/borrowed\nshow prompts & QR scanner before logout"]
+  end
+
+  LMirror --> MLogin --> MAuth --> MCreateSession --> MCheckStatus
+  MCheckStatus --> MBorrowReturn
+  MLogoutFlow -->|End session| MCreateSession
+
+  subgraph BackendLibSess[Python Backend – Library Sessions]
+    LibSessAPI["library_session_manager.py\n/api/library/login, /logout, /force-logout, /active-sessions, /forgotten-logouts"]
+  end
+
+  subgraph DBLibSess[DB – Library Sessions]
+    DBLibSessions[("library_sessions" table\nper login/logout with timestamps, method, user_type='student')]
+    DBActiveSessions[("active_sessions" table\ncurrently inside library)]
+    DBActivity[("activity_log" table\nwho did what, when, method)]
+  end
+
+  MCreateSession --> LibSessAPI
+  LibSessAPI --> DBLibSessions
+  LibSessAPI --> DBActiveSessions
+  LibSessAPI --> DBActivity
+  MLogoutFlow --> LibSessAPI
+  MBorrowReturn --> LibSessAPI
+
+  %% ==========================
+  %% MAIN STUDENT UI (DASHBOARD, BOOKS, HISTORY)
+  %% ==========================
+  subgraph MainUI[Main Web App – Student UI]
+    NavBar["Top Navigation Bar:\n- JRMSU Logo / Cubase Icon\n- Notification Bell (Unread + Mark all read)\n- Settings Icon (Account, Theme, Security)\n- AI Assistant"]
+    SideBar["Sidebar (Student):\n- Dashboard\n- Book Inventory\n- Borrow/Return History\n- Authentication & 2FA\n- Profile\n- Logout"]
+
+    Dash["Dashboard (Student):\n- Total Books (overview)\n- Active Borrowers (overall)\n- Books Borrowed Today\n- Overdue Returns\n- Recent Activity (login/logout, borrow/return)"]
+
+    BookInv["Book Inventory (Student):\n- Browse/search book list\n- AI search (title, A–Z, category, status)\n- View availability & categories\n- Reserve (if feature enabled)"]
+
+    BorrowHistory["Borrow/Return History (Student):\n- Transactions for this student\n- Book, Borrow Date, Due Date, Return Date, Status\n- Export report (if allowed)"]
+
+    Auth2FA["Authentication & 2FA (Student):\n- Enable/Disable 2FA\n- Setup 2FA via QR + manual key\n- Backup codes (download / copy)\n- Change password\n- Notification preferences (email, SMS, push)"]
+
+    ProfilePage["Student Profile:\n- View/Update personal info (except Student ID)\n- Course, year level, section\n- Contact & addresses\n- Download/Regenerate QR\n- 2FA status overview"]
+  end
+
+  LoginSuccess --> NavBar
+  LoginSuccess --> SideBar
+  LoginSuccess --> Dash
+  SideBar --> Dash
+  SideBar --> BookInv
+  SideBar --> BorrowHistory
+  SideBar --> Auth2FA
+  SideBar --> ProfilePage
+
+  %% ==========================
+  %% BACKEND – LIBRARY & BORROW/RETURN (STUDENT PERSPECTIVE)
+  %% ==========================
+  subgraph BackendLibOps[Python Backend – Library Ops (Student)]
+    LibAPI["library_endpoints.py:\n- /api/library/reserve-book\n- /api/library/cancel-reservation\n- /api/library/borrow-book\n- /api/library/return-book\n- /api/library/activate-return-time\n- /api/library/user-status/{studentId}\n- /api/library/user-reservations/{studentId}\n- /api/library/user-borrowed/{studentId}"]
+    DashAPI["Dashboard & Reports API (used by student dashboard in read-only way):\n- /api/dashboard/*\n- /api/activity-log"]
+  end
+
+  subgraph DBLib[DB – Library Data]
+    DBBooks[("books" table\nbook_id, title, author, category, copies, available_copies, status)]
+    DBBorrow[("borrow_records" table\nborrow_id, user_id, user_type='student', book_id, dates, status, return_time_activated)]
+    DBRes[("reservations" table\nreservation_id, user_id, user_type='student', book_id, status, quantity)]
+  end
+
+  BookInv --> LibAPI
+  LibAPI --> DBBooks
+  LibAPI --> DBRes
+  BorrowHistory --> LibAPI
+  BorrowHistory --> DashAPI
+  MCheckStatus --> LibAPI
+  MBorrowReturn --> LibAPI
+  LibAPI --> DBBorrow
+  Dash --> DashAPI
+  DashAPI --> DBBooks
+  DashAPI --> DBBorrow
+  DashAPI --> DBRes
+
+  %% ==========================
+  %% NOTIFICATIONS & ACTIVITY (STUDENT)
+  %% ==========================
+  subgraph BackendNotif[Python Backend – Notifications & Activity]
+    NotifAPI["notifications_routes.py & notifications_service.py:\n- /api/notifications (student)\n- /api/notifications/mark-read/all\n- /api/activity-log\n- notify_user(studentId), log_activity"]
+  end
+
+  subgraph DBNotif[DB – Notifications & Logs]
+    DBNotifications[("notifications" table\nnotification_id, receiver_id (studentId), type, message, status)]
+    DBActivity2[("activity_log" table\nstudent events: login, logout, borrow, return, 2fa_enable/disable)]
+  end
+
+  NavBar --> NotifAPI
+  NotifAPI --> DBNotifications
+  Dash --> NotifAPI
+  NotifAPI --> DBActivity2
+
+  %% ==========================
+  %% AUTH SETTINGS, 2FA, SECURITY (STUDENT)
+  %% ==========================
+  subgraph BackendSecurity[Python Backend – Student Security Settings]
+    TwoFAAPI["2FA Endpoints (Student):\n- /api/students/{id}/2fa/setup\n- /api/students/{id}/2fa/verify\n- /api/students/{id}/2fa/disable"]
+    PasswordAPI["Password & Recovery (Student):\n- /api/password/reset\n- password_endpoints.py"]
+  end
+
+  Auth2FA --> TwoFAAPI --> DBStudents
+  NavBar --> PasswordAPI --> DBStudents
+
+  %% ==========================
+  %% AI ASSISTANT (STUDENT VIEW)
+  %% ==========================
+  subgraph AI[AI Assistant – Student]
+    AIBtn["AI Assistant Button (Navbar)"]
+    AIPanel["Assistant Modes:\n- Study Helper\n- System Guide\n- Technical Support\n- Voice Response"]
+  end
+
+  subgraph AIServer[AI Server & DB]
+    AIHTTP["ai_server/app.py:\n- /ai/chat, /ai/search, /ai/health"]
+    AIDB[("library_system_ai" DB – optional logs of student AI chats)]
+  end
+
+  AIBtn --> AIPanel
+  AIPanel --> AIHTTP
+  AIHTTP --> AIDB
+  AIHTTP --> DBBooks
+  AIHTTP --> DBRes
+  AIHTTP --> DBBorrow
+
+  %% ==========================
+  %% LOGOUT (STUDENT)
+  %% ==========================
+  Logout["Logout Button (Navbar / Sidebar)"]
+  Logout --> AuthAPI
+  AuthAPI --> DBActivity2

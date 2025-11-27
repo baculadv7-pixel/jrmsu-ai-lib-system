@@ -90,7 +90,11 @@ export function ActiveSessionsPanel({ currentUserId, onLogoutCurrentUser }: Acti
       const url = new URL(`${API_BASE}/api/library/active-sessions`);
       if (q) url.searchParams.set('q', q);
       const res = await fetch(url.toString());
-      if (!res.ok) return;
+      if (!res.ok) {
+        // When backend is down or endpoint is missing, show no sessions instead of throwing.
+        setSessions([]);
+        return;
+      }
       const data = await res.json();
       const items: ActiveSessionItem[] = (data.items || []).map((r: any) => ({
         userId: r.userId,
@@ -99,6 +103,9 @@ export function ActiveSessionsPanel({ currentUserId, onLogoutCurrentUser }: Acti
         loginTime: typeof r.loginTime === 'number' ? r.loginTime : Math.floor(Date.parse(r.loginTime)/1000),
       }));
       setSessions(items);
+    } catch (e) {
+      console.warn('ActiveSessionsPanel: failed to load sessions', e);
+      setSessions([]);
     } finally {
       setLoading(false);
     }
@@ -108,7 +115,7 @@ export function ActiveSessionsPanel({ currentUserId, onLogoutCurrentUser }: Acti
     // Initial load of active sessions when panel mounts
     load();
     // Realtime updates from backend (login/logout, forced logout, etc.)
-    const s = io(API_BASE, { transports: ['websocket','polling'], withCredentials: true, reconnection: true, reconnectionAttempts: 10, reconnectionDelay: 500 });
+    const s = io(API_BASE, { transports: ['polling','websocket'], withCredentials: true, reconnection: true, reconnectionAttempts: 5, reconnectionDelay: 1000 });
     socketRef.current = s;
     s.on('session_update', (payload: any) => {
       if (payload?.type === 'logout' && payload?.userId) {

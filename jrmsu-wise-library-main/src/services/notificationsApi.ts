@@ -84,7 +84,14 @@ export const NotificationsAPI = {
       try {
         const io = await getIO();
         if (cancelled) return;
-        socket = io(API.BACKEND.BASE, { transports: ["websocket", "polling"], withCredentials: true, query: { userId } });
+        socket = io(API.BACKEND.BASE, {
+          transports: ["polling"],
+          withCredentials: true,
+          query: { userId },
+          reconnection: true,
+          reconnectionAttempts: 3,
+          reconnectionDelay: 1000,
+        });
         socket.on("connected", () => {});
         socket.on("notification.new", (n: NotificationItem) => handlers.onNew?.(n));
         socket.on("notification.update", (n: NotificationItem) => handlers.onUpdate?.(n));

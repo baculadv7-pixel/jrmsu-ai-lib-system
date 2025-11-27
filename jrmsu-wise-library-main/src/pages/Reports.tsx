@@ -116,13 +116,15 @@ const Reports = () => {
     const load = async () => {
       try {
         const [tb, cd] = await Promise.all([
-          fetch('http://localhost:5000/api/reports/top-borrowed').then(r=>r.json()).catch(()=>null),
-          fetch('http://localhost:5000/api/reports/category-dist').then(r=>r.json()).catch(()=>null),
+          fetch(`${API_BASE}/api/reports/top-borrowed`).then(r=>r.ok ? r.json() : null).catch(()=>null),
+          fetch(`${API_BASE}/api/reports/category-dist`).then(r=>r.ok ? r.json() : null).catch(()=>null),
         ]);
         if (!alive) return;
-        if (tb?.items) setTopBorrowed(tb.items);
-        if (cd?.items) setCategoryDist(cd.items);
-        if ((!tb?.items || !cd?.items)) {
+        const tbItems = Array.isArray(tb?.items) ? tb!.items : [];
+        const cdItems = Array.isArray(cd?.items) ? cd!.items : [];
+        if (tbItems.length > 0) setTopBorrowed(tbItems);
+        if (cdItems.length > 0) setCategoryDist(cdItems);
+        if (tbItems.length === 0 || cdItems.length === 0) {
           // Fallback to simple client-side computation using already-loaded rows
           const counts: Record<string, number> = {};
           circulationRows.forEach(b => { counts[b.Book] = (counts[b.Book] || 0) + 1; });
@@ -437,7 +439,10 @@ const Reports = () => {
           { key: 'Returned', label: 'Returned Date' },
           { key: 'Status', label: 'Status' },
         ]}
-        detailRows={circulationRows.filter(r => r.Borrowed === new Date().toISOString().slice(0,10))}
+        detailRows={(() => {
+          const today = new Date().toISOString().slice(0,10);
+          return circulationRows.filter(r => (r.Borrowed || '').slice(0,10) === today);
+        })()}
       />
       <ReportsOverlay
         title="Active Borrowers Trend"

@@ -128,14 +128,16 @@ export function LibrarySessionProvider({ children }: { children: ReactNode }) {
 
   const forceLogoutUser = async (userId: string) => {
     try {
-      const r = await fetch(`${API_BASE}/api/library/force-logout`, {
+      const r = await fetch(`${API_BASE}/api/library/logout`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId })
       });
       if (!r.ok) return false;
       if (session?.userId === userId) setSession(null);
       return true;
-    } catch { return false; }
+    } catch {
+      return false;
+    }
   };
 
   const endSession = async () => {
@@ -144,16 +146,12 @@ export function LibrarySessionProvider({ children }: { children: ReactNode }) {
     try {
       let ok = false;
       try {
-        // Always delegate to force-logout so the DB-backed active_sessions
-        // table and library_sessions table are reliably updated, and the
-        // ActiveSessionsPanel on the mirror page stops showing the user
-        // after logout and page refresh.
-        const res = await fetch(`${API_BASE}/api/library/force-logout`, {
+        const res = await fetch(`${API_BASE}/api/library/logout`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ userId: session.userId })
         });
-        ok = res.ok || res.status === 404; // treat 404 (no active session) as success
+        ok = res.ok || res.status === 404; // treat "no active session" as success
       } catch {}
 
       if (!ok) {
