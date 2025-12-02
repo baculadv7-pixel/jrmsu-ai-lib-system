@@ -508,8 +508,8 @@ const Books = () => {
               </CardHeader>
               <CardContent>
                 {viewMode==='list' && (
-                <div className="overflow-x-auto max-w-full">
-                <Table>
+                <div className="overflow-x-auto overflow-y-auto max-h-[60vh]">
+                <Table className="min-w-[800px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Book ID</TableHead>

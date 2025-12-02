@@ -114,7 +114,7 @@ const Sidebar = ({ userType }: SidebarProps) => {
           <div className="fixed inset-0 z-50">
             <div className="absolute inset-0 bg-black/45" onClick={() => { localStorage.setItem(MOBILE_KEY, 'false'); setMobileOpen(false); }} />
             <aside className={cn(
-              "absolute left-0 top-0 h-full w-[80vw] max-w-[18rem] bg-card border-r shadow-sm overflow-y-auto scroll-smooth transform transition-transform duration-200 z-50",
+              "absolute left-0 top-16 h-[calc(100%-4rem)] w-[80vw] max-w-[18rem] bg-card border-r shadow-sm overflow-y-auto scroll-smooth transform transition-transform duration-200 z-50",
               mobileOpen ? "translate-x-0" : "-translate-x-full"
             )}>
               {AsideInner}

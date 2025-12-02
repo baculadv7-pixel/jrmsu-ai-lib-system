@@ -1,0 +1,20 @@
+{
+  "name": "desktopapplibrary",
+  "version": "1.0.0",
+  "description": "JRMSU AI-Library System Desktop App (Electron wrapper)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "electron": "^39.2.4",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

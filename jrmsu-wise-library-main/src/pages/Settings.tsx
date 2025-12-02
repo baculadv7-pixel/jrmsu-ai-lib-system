@@ -550,7 +550,7 @@ const Settings = () => {
         <Sidebar userType={userType} />
         
         <main className="flex-1 p-6">
-          <div className="max-w-4xl mx-auto space-y-6">
+          <div className="w-[95vw] md:w-[90vw] lg:w-[80vw] xl:w-[70vw] max-w-4xl mx-auto space-y-6 overflow-y-auto">
             <div>
               <h1 className="text-3xl font-bold text-primary">
                 {userType === "admin" ? "Authentication & System Settings" : "Authentication & 2FA Settings"}

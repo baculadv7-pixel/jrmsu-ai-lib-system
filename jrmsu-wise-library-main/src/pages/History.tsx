@@ -115,7 +115,7 @@ const History = () => {
         <Sidebar userType={userType} />
         
         <main className="flex-1 p-6">
-          <div className="max-w-7xl mx-auto space-y-6">
+          <div className="w-[95vw] md:w-[90vw] lg:w-[85vw] xl:w-[80vw] max-w-7xl mx-auto space-y-6 overflow-y-auto">
             <div>
               <h1 className="text-3xl font-bold text-primary">Borrow/Return History</h1>
               <p className="text-muted-foreground mt-1">
@@ -199,8 +199,8 @@ const History = () => {
                 <CardTitle>Transaction Records</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="overflow-x-auto">
-                  <table className="w-full">
+                <div className="overflow-x-auto overflow-y-auto max-h-[60vh]">
+                  <table className="w-full min-w-[900px]">
                     <thead>
                       <tr className="border-b">
                         <th className="text-left p-3 font-medium">Transaction ID</th>
