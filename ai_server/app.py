@@ -29,6 +29,9 @@ AI_SERVER_PORT = 5002
 OLLAMA_URL = "http://127.0.0.1:11434"
 # Force Ollama host for CLI as well (prevents external overrides)
 os.environ["OLLAMA_HOST"] = OLLAMA_URL
+# Model name used when calling Ollama. Set this in the environment to change models (e.g. "llama3:8b-instruct-q4_K_M").
+# To use Claude Haiku 4.5 via Ollama (if available) set `OLLAMA_MODEL` accordingly.
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3:8b-instruct-q4_K_M")
 
 # Base URL of main backend for catalog and metadata queries
 LIBRARY_API_BASE = os.getenv("LIBRARY_API_BASE", "http://localhost:5000")
@@ -176,12 +179,21 @@ def run_llama(user_prompt: str) -> str:
         f"User message:\n{user_prompt.strip()}\n\n"
         f"Jose (short helpful answer, using the context above when relevant):"
     )
-    result = subprocess.run(
-        ["ollama", "run", "llama3:8b-instruct-q4_K_M"],
-        input=full_prompt.encode("utf-8"),
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
+    # Use configured model name when invoking Ollama. This lets operators switch
+    # models (for example to a different local model or a pulled Claude model)
+    # by setting the `OLLAMA_MODEL` environment variable.
+    try:
+        result = subprocess.run(
+            ["ollama", "run", OLLAMA_MODEL],
+            input=full_prompt.encode("utf-8"),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=120
+        )
+    except Exception as e:
+        # Provide a clearer error when the model cannot be launched
+        print(f"[AI_SERVER] Ollama run failed for model '{OLLAMA_MODEL}': {e}")
+        return f"Error: AI model unavailable ({OLLAMA_MODEL})."
     return result.stdout.decode("utf-8").strip()
 
 # 🔹 Function: detect emotion via sentiment (fallback if TextBlob missing)

@@ -1,0 +1,30 @@
+JRMSU AI Library — Problems & Proposed Solutions
+
+1) Problem: User/Student login/logout is unreliable; library system does not properly record sessions.
+   - Evidence: Mirror page and main library have different behaviors; see `READMETWO.md`, `READMETHREE.md`, `READMEONE.md` for authentication flows and AuthProvider usage.
+   - Solution: Centralize authentication flows in `AuthProvider` (frontend), ensure backend session endpoints implement token-based sign-in/out, and add server-side logging for `library_login_manual` events (mirror-login already emits these). Add e2e tests that exercise sign-in/sign-out flows.
+
+2) Problem: Borrow/return operation uses handwritten records and lacks structured borrow_records/reservations lifecycle.
+   - Evidence: Paper-based borrow records referenced by admins. Project contains `reservations` and `borrow_records` in data model (see `READMEFIVE.md` / docs) but workflows are not fully enforced.
+   - Solution: Implement full borrow-reservation lifecycle endpoints (reserve -> borrow -> return) with validations and time windows. Add UI pages in mirror and main app to scan, confirm, and timestamp borrow/return, and persist to `borrow_records` table. Add admin notifications and late-return handling.
+
+3) Problem: JRMSU KC library lacks features present in the mirror page (search, AI assistant, improved UI, and automated borrow flow).
+   - Evidence: Mirror page contains enhanced features and AI assistant integration (see `mirror-login-page/` and `jrmsu-wise-library-main/` frontends). The main library site has fewer features.
+   - Solution: Align features by reusing mirror components (search, reservations, AI assistant) and harmonize backend APIs. Create a migration plan to move features from mirror to main application progressively.
+
+4) Problem: AI assistant depends on a specific local model (LLaMA 3 via Ollama) and is not easily switchable.
+   - Evidence: `ai_server/app.py` references `llama3:8b-instruct-q4_K_M` and several docs instruct `ollama pull llama3:8b-instruct-q4_K_M`.
+   - Solution: Make model configurable via environment variables (`OLLAMA_MODEL`) so operators can switch to different models (e.g., other LLaMA variants or provider models) without code changes. If using a hosted model (Anthropic/Claude Haiku 4.5), document steps to integrate via Ollama or via provider API.
+
+Next steps / Actions you can take now:
+- Read `READMETWO.md`, `READMETHREE.md`, `READMEONE.md` for admin/student flows.
+- Start Ollama and pull the desired model, or configure AI server to use an external API (Anthropic) if Claude Haiku 4.5 is required.
+- Run the AI server and test model switching by setting `OLLAMA_MODEL`.
+
+Files that show evidence and implementation points:
+- `READMETWO.md`, `READMETHREE.md`, `READMEONE.md` — authentication and frontend flows
+- `ai_server/app.py` — AI server model invocation and endpoints
+- `mirror-login-page/` and `jrmsu-wise-library-main/` — mirror frontend features and AI assistant components
+
+Prepared by: Project maintainer notes
+Date: 2025-12-04

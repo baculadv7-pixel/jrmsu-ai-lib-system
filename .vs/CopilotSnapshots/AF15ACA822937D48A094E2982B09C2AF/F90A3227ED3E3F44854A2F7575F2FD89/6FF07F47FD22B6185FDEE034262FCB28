@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 from flask import Flask, request, jsonify, Response
 from twofa import generate_base32_secret, current_totp_code, verify_totp_code, key_uri
 import json
@@ -1279,15 +1279,6 @@ try:
         print('✅ Library session endpoints already loaded')
 except Exception as e:
     print(f'⚠️  Library session endpoints not loaded (app): {e}')
-
-# Register 2FA endpoints for persistence
-try:
-    from twofa_endpoints import register_twofa_endpoints
-    register_twofa_endpoints(app)
-    print('✅ 2FA persistence endpoints loaded')
-except Exception as e:
-    print(f'⚠️  2FA endpoints not loaded: {e}')
-
 # Register notifications blueprint if available
 try:
     from notifications_routes import notifications_bp

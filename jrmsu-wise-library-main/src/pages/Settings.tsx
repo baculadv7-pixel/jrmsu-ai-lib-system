@@ -62,6 +62,16 @@ const Settings = () => {
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isChangingPassword, setIsChangingPassword] = useState(false);
+  
+  // 2FA state initialization from user context
+  const [twoFAEnabled, setTwoFAEnabled] = useState(user?.twoFactorEnabled ?? false);
+  
+  // Sync 2FA state when user updates
+  useEffect(() => {
+    if (user?.twoFactorEnabled !== undefined) {
+      setTwoFAEnabled(user.twoFactorEnabled);
+    }
+  }, [user?.twoFactorEnabled]);
 
   // Overlay states
   const [showBackupRestore, setShowBackupRestore] = useState(false);

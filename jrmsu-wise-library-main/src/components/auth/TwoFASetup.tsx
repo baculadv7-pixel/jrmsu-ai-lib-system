@@ -170,6 +170,28 @@ export default function TwoFASetup({
       }
       if (!ok) throw new Error('Invalid code');
 
+      // ✅ IMPORTANT: Save 2FA secret to backend BEFORE enabling locally
+      if (user?.id) {
+        try {
+          const saveResp = await fetch('http://localhost:5000/api/users/2fa/enable', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              user_id: user.id,
+              user_type: user.role,
+              two_factor_secret: twoFactorData.secret
+            })
+          });
+          if (!saveResp.ok) {
+            const errData = await saveResp.json().catch(() => ({}));
+            throw new Error(errData.error || 'Failed to save 2FA to server');
+          }
+        } catch (err) {
+          console.warn('Failed to save 2FA to backend:', err);
+          // Don't fail - local enable will work
+        }
+      }
+
       enableTwoFactor(twoFactorData.secret);
       
       const completedSetup = {
@@ -208,8 +230,38 @@ export default function TwoFASetup({
       // Enable 2FA - generate setup
       await handleGenerateSetup();
     } else {
-      // Show disable form; actual disable happens on button click after password match
-      setShowSetup(false);
+      // Disable 2FA - save to backend
+      if (!user?.id) {
+        toast({
+          title: "Cannot disable 2FA",
+          description: "User not found",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      try {
+        const disableResp = await fetch('http://localhost:5000/api/users/2fa/disable', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: user.id,
+            user_type: user.role
+          })
+        });
+        if (!disableResp.ok) {
+          const errData = await disableResp.json().catch(() => ({}));
+          throw new Error(errData.error || 'Failed to disable 2FA');
+        }
+      } catch (err) {
+        console.warn('Failed to disable 2FA:', err);
+      }
+      
+      disableTwoFactor();
+      toast({
+        title: "2FA disabled",
+        description: "Two-factor authentication has been disabled on your account."
+      });
     }
   };
 

@@ -145,18 +145,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
     setUser(session);
-    // Hydrate with backend profile for complete data
+    // Hydrate with backend profile for complete data including 2FA state
     try {
       const r = await fetch('http://localhost:5000/api/users/' + encodeURIComponent(dbUser.id));
       if (r.ok) {
         const backendUser: any = await r.json();
-        // Merge while preserving local 2FA state when backend does not yet expose it
+        // ✅ IMPORTANT: Use backend 2FA state for persistence across restarts
         const merged: AuthUser = {
           ...session,
           ...backendUser,
-          // Final 2FA flag: if the local session says it's enabled, NEVER let backend
-          // turn it off. Backend can only turn it ON (true), not OFF (false).
-          twoFactorEnabled: Boolean(session.twoFactorEnabled || backendUser.twoFactorEnabled),
+          // Use backend 2FA enabled state (persisted in database)
+          twoFactorEnabled: Boolean(backendUser.twoFactorEnabled),
           // Secret: prefer explicit backend key if present, otherwise keep local key.
           authKey:
             (backendUser.twoFactorKey as string | undefined) ?? session.authKey,
@@ -164,7 +163,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(merged));
         setUser(merged);
       }
-    } catch {}
+    } catch (err) {
+      console.warn('Failed to hydrate user from backend:', err);
+      // Continue with local session if backend unavailable
+    }
 
     try { ActivityService.log(dbUser.id, 'login'); } catch { /* noop */ }
 

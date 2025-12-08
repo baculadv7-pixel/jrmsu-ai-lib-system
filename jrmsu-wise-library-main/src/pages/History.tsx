@@ -244,47 +244,55 @@ const History = () => {
                           </td>
                           <td className="p-3">
                             {record.status === "borrowed" || record.status === "overdue" ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={async () => {
-                                  try {
-                                    const res = await fetch(`${API_BASE}/api/library/return-book`, {
-                                      method: 'POST',
-                                      headers: { 'Content-Type': 'application/json' },
-                                      credentials: 'include',
-                                      body: JSON.stringify({
-                                        userId: record.studentId,
-                                        bookId: record.bookId,
-                                      }),
-                                    });
-                                    if (!res.ok) {
-                                      console.error('Failed to mark return via backend');
+                              // Students see read-only status card
+                              userType === "student" ? (
+                                <div className="rounded-md border border-yellow-200 bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
+                                  ⏳ Awaiting Return
+                                </div>
+                              ) : (
+                                // Admins see clickable return button
+                                <Button
+                                  size="sm"
+                                  variant="default"
+                                  className="gap-2"
+                                  onClick={async () => {
+                                    try {
+                                      const res = await fetch(`${API_BASE}/api/library/mark-returned`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        credentials: 'include',
+                                        body: JSON.stringify({
+                                          borrowId: record.borrowId,
+                                        }),
+                                      });
+                                      if (!res.ok) {
+                                        const error = await res.json();
+                                        toast({
+                                          title: 'Return failed',
+                                          description: error.error || 'Failed to mark book as returned',
+                                          variant: 'destructive',
+                                        });
+                                        return;
+                                      }
+                                      NotificationsService.add({ receiverId: record.studentId, type: 'return', message: `Your book "${record.bookTitle}" has been returned` });
+                                      await loadHistory();
                                       toast({
-                                        title: 'Return failed',
-                                        description: 'Backend did not accept the return request.',
+                                        title: 'Success',
+                                        description: `${record.bookTitle} marked as returned.`,
+                                      });
+                                    } catch (err) {
+                                      console.error('Error marking book as returned:', err);
+                                      toast({
+                                        title: 'Error',
+                                        description: 'Failed to mark book as returned',
                                         variant: 'destructive',
                                       });
-                                      return;
                                     }
-                                    NotificationsService.add({ receiverId: record.studentId, type: 'return', message: `Returned ${record.bookTitle}` });
-                                    await loadHistory();
-                                    toast({
-                                      title: 'Book returned',
-                                      description: `${record.bookTitle} marked as returned.`,
-                                    });
-                                  } catch (err) {
-                                    console.error('Error calling return-book backend:', err);
-                                    toast({
-                                      title: 'Return failed',
-                                      description: 'Network or server error while returning book.',
-                                      variant: 'destructive',
-                                    });
-                                  }
-                                }}
-                              >
-                                Mark Returned
-                              </Button>
+                                  }}
+                                >
+                                  ✓ Mark Returned
+                                </Button>
+                              )
                             ) : (
                               <span className="text-xs text-muted-foreground">—</span>
                             )}
