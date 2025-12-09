@@ -801,17 +801,35 @@ const Books = () => {
                       <TableCell>{reservation.quantity ?? 1}</TableCell>
                       <TableCell><Badge variant="outline">Reserved</Badge></TableCell>
                       <TableCell>
-                        {userType === 'student' && reservation.userId === (user?.id ?? '') ? (
+                        {(userType === 'student' && reservation.userId === (user?.id ?? '')) || userType === 'admin' ? (
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={async () => {
                               try {
-                                // Cancel locally from ReservationsService since
-                                // these records are currently stored in
-                                // localStorage for the /books page.
-                                ReservationsService.remove(reservation.reservationId);
+                                // Call backend to cancel the real reservation record
+                                const res = await fetch(`${API_BASE}/api/library/cancel-reservation`, {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({
+                                    userId: reservation.userId,
+                                    bookId: reservation.bookId,
+                                    // sessionId is optional; omit here so backend falls back to userId for naming
+                                  }),
+                                });
+
+                                if (!res.ok) {
+                                  const data = await res.json().catch(() => ({} as any));
+                                  const msg = data?.error || 'Unable to cancel reservation.';
+                                  throw new Error(msg);
+                                }
+
+                                // Remove from local state so the table updates immediately
                                 setReservationRecords(prev => prev.filter(r => r.reservationId !== reservation.reservationId));
+
+                                // Best-effort: also remove from legacy local ReservationsService store (if any)
+                                try { ReservationsService.remove(reservation.reservationId); } catch {}
+
                                 toast({
                                   title: 'Reservation cancelled',
                                   description: `${reservation.bookTitle} reservation has been cancelled.`,

@@ -102,7 +102,7 @@ class AdminApiService {
           email: data.email,
           phone: data.phone,
           
-          // Address information
+          // Address information (frontend naming)
           addressRegion: data.addressRegion,
           addressProvince: data.addressProvince,
           addressMunicipality: data.addressMunicipality,
@@ -110,7 +110,7 @@ class AdminApiService {
           addressStreet: data.addressStreet,
           addressCountry: data.addressCountry,
           addressZip: data.addressZip,
-          // Optional: permanent address fields (backend ignores if not used)
+          // Optional: permanent address fields (frontend naming)
           addressPermanent: data.addressPermanent,
           addressPermanentNotes: data.addressPermanentNotes,
           sameAsCurrent: data.sameAsCurrent,
@@ -121,7 +121,24 @@ class AdminApiService {
           permanentAddressRegion: data.permanentAddressRegion,
           permanentAddressCountry: data.permanentAddressCountry,
           permanentAddressZip: data.permanentAddressZip,
-          
+
+          // Backend (Python/MySQL) naming for primary address
+          street: data.addressStreet,
+          barangay: data.addressBarangay,
+          municipality: data.addressMunicipality,
+          province: data.addressProvince,
+          region: data.addressRegion,
+          zipCode: data.addressZip,
+
+          // Backend naming for current address (if different from permanent)
+          currentStreet: data.addressStreet,
+          currentBarangay: data.addressBarangay,
+          currentMunicipality: data.addressMunicipality,
+          currentProvince: data.addressProvince,
+          currentRegion: data.addressRegion,
+          currentZip: data.addressZip,
+          currentLandmark: data.addressPermanentNotes,
+
           // Security
           password: data.password,
         })

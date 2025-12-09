@@ -91,12 +91,34 @@ export function LibrarySessionProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({ userId, userType, fullName, method: loginMethod })
       });
 
+      let data: any = null;
+      try { data = await response.json(); } catch { /* ignore parse error */ }
+
+      // Gracefully handle "already has active session" as a non-fatal condition
       if (!response.ok) {
-        throw new Error('Failed to create library session');
+        const msg: string = data?.error || 'Failed to create library session';
+        if (msg.toLowerCase().includes('already has active session')) {
+          console.warn('⚠️ Library session already active for user, reusing existing session:', { userId, msg });
+          const existingSessionId = data?.sessionId || session?.sessionId || `lib-${userId}`;
+          const reused: LibrarySession = {
+            sessionId: existingSessionId,
+            userId,
+            userType,
+            fullName,
+            loginTime: session?.loginTime || new Date(),
+            status: 'active',
+            hasReservations: data?.hasReservations || false,
+            hasBorrowedBooks: data?.hasBorrowedBooks || false,
+            reservedBooks: data?.reservedBooks || [],
+            borrowedBooks: data?.borrowedBooks || [],
+            loginMethod,
+          };
+          setSession(reused);
+          return;
+        }
+        throw new Error(msg);
       }
 
-      const data = await response.json();
-      
       const newSession: LibrarySession = {
         sessionId: data.sessionId,
         userId,

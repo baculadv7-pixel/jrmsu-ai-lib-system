@@ -38,7 +38,13 @@ export async function connectRealtime(
 ) {
   const io = await getIO();
   try { socket?.disconnect(); } catch {}
-  socket = io(API.BACKEND.BASE, { transports: ["websocket"], withCredentials: true, query: { userId: opts?.userId || '' } });
+  // Use long-polling transport only to avoid WebSocket frame header issues in some environments.
+  // Realtime updates are low-frequency (sessions, user/profile, books), so polling is sufficient.
+  socket = io(API.BACKEND.BASE, {
+    transports: ["polling"],
+    withCredentials: true,
+    query: { userId: opts?.userId || '' }
+  });
   const events: MirrorEvent[] = [
     'session_update','session_cleanup','user.updated','students.updated','admins.updated',
     'book.added','book.removed','book.borrowed','book.returned','book.overdue'

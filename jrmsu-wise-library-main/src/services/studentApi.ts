@@ -156,6 +156,7 @@ class StudentApiService {
           block: validation.block, // Extracted from Student ID
           
           // Current Address Information (where student lives now)
+          // Frontend naming
           addressRegion: data.addressRegion,
           addressProvince: data.addressProvince,
           addressMunicipality: data.addressMunicipality,
@@ -165,7 +166,17 @@ class StudentApiService {
           addressZip: data.addressZip,
           addressLandmark: data.addressPermanentNotes,
           
+          // Backend (Python/MySQL) naming for current address
+          currentStreet: data.addressStreet,
+          currentBarangay: data.addressBarangay,
+          currentMunicipality: data.addressMunicipality,
+          currentProvince: data.addressProvince,
+          currentRegion: data.addressRegion,
+          currentZip: data.addressZip,
+          currentLandmark: data.addressPermanentNotes,
+          
           // Permanent Address Information (official home address)
+          // Frontend naming
           addressPermanent: data.addressPermanent,
           permanentAddressStreet: data.permanentAddressStreet,
           permanentAddressBarangay: data.permanentAddressBarangay,
@@ -175,6 +186,15 @@ class StudentApiService {
           permanentAddressCountry: data.permanentAddressCountry || 'Philippines',
           permanentAddressZip: data.permanentAddressZip,
           permanentAddressNotes: data.addressPermanentNotes,
+          
+          // Backend (Python/MySQL) naming for permanent address
+          permanentStreet: data.permanentAddressStreet,
+          permanentBarangay: data.permanentAddressBarangay,
+          permanentMunicipality: data.permanentAddressMunicipality,
+          permanentProvince: data.permanentAddressProvince,
+          permanentRegion: data.permanentAddressRegion,
+          permanentZip: data.permanentAddressZip,
+          permanentNotes: data.addressPermanentNotes,
           sameAsCurrent: data.sameAsCurrent || false,
           
           // Security

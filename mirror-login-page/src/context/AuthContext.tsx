@@ -115,10 +115,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.warn("Student ID format unexpected; attempting backend lookup anyway.");
     }
     
-    // Query backend user info (shared MySQL database)
+    // Query backend user info (shared MySQL/database)
     try {
       const base = API.BACKEND.BASE;
-      // Preferred: server-side bcrypt validation
+      // 1) Preferred: server-side bcrypt validation
       try {
         const r = await fetch(`${base}/api/auth/login`, {
           method: 'POST',
@@ -144,16 +144,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
       } catch {}
-      // Try declared role first, then the other role as fallback
+
+      // 2) If password-based login fails (legacy users), try role-specific lookups
       const endpoints = role === 'admin'
         ? [`${base}/api/admins/${encodeURIComponent(id)}`, `${base}/api/students/${encodeURIComponent(id)}`]
         : [`${base}/api/students/${encodeURIComponent(id)}`, `${base}/api/admins/${encodeURIComponent(id)}`];
       let backendUser: any = null;
       for (const url of endpoints) {
-        const res = await fetch(url);
-        if (res.ok) { backendUser = await res.json(); break; }
+        try {
+          const res = await fetch(url);
+          if (res.ok) { backendUser = await res.json(); break; }
+        } catch { /* ignore and try next */ }
       }
-      if (backendUser) {
+
+      // 3) Final backend fallback: unified /api/users/<id> (covers file-backed + DB users)
+      if (!backendUser) {
+        try {
+          const res = await fetch(`${base}/api/users/` + encodeURIComponent(id));
+          if (res.ok) {
+            backendUser = await res.json();
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (backendUser && (backendUser.id || backendUser.studentId || backendUser.adminId)) {
         const resolvedRole: UserRole = (backendUser.role || backendUser.userType || role) as UserRole;
         const session: AuthUser = {
           ...(backendUser || {}),
@@ -169,9 +183,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         try { ActivityService.log(session.id, 'login'); } catch {}
         return;
       }
-    } catch { /* fall back */ }
+    } catch { /* fall back to local mock DB */ }
     
-    // Fallback to localStorage if backend record not found
+    // 4) Fallback to localStorage-based mock DB if backend/user record not found
     const authResult = databaseService.authenticateUser(id, password);
     
     if (!authResult.success || !authResult.user) {

@@ -399,7 +399,7 @@ class DatabaseService {
     const user = this.getUserById(qrData.userId);
     
     if (!user) {
-      console.error('❌ User not found in database:', qrData.userId);
+      console.warn('⚠️ User not found in local QR database:', qrData.userId);
       // List all available users for debugging
       const allUsers = this.getAllUsers();
       console.log('🔍 Available users in database:', allUsers.map(u => ({ id: u.id, fullName: u.fullName, userType: u.userType })));
