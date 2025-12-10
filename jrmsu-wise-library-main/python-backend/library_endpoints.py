@@ -616,6 +616,11 @@ def register_library_endpoints(app):
     def library_cancel_reservation():
         """Cancel book reservation.
         Only the user who owns the reservation can cancel it.
+
+        IMPORTANT: Because /api/library/reserve-book now decrements
+        books.available_copies when a reservation is created, this endpoint
+        must restore that availability when a reservation is cancelled so
+        that users can reserve the same book again.
         """
         body = request.get_json(force=True)
         user_id = (body.get('userId') or '').strip()
@@ -654,8 +659,31 @@ def register_library_endpoints(app):
                 (user_id, reservation['id']),
             )
             
-            # (Optional) restore book availability if you decrement on reserve –
-            # here we assume reserve does NOT change available_copies, so we skip it.
+            # Restore book availability that was reserved.
+            # If a quantity column exists on reservations, use it; otherwise
+            # fall back to 1 copy per reservation.
+            try:
+                qty = 1
+                try:
+                    qval = reservation.get('quantity') if isinstance(reservation, dict) else None
+                    if qval is not None:
+                        qty = max(int(qval), 1)
+                except Exception:
+                    qty = 1
+
+                restore_sql = """
+                    UPDATE books
+                    SET available_copies = LEAST(total_copies, IFNULL(available_copies, 0) + %s),
+                        status = CASE
+                            WHEN LEAST(total_copies, IFNULL(available_copies, 0) + %s) <= 0 THEN status
+                            ELSE 'available'
+                        END
+                    WHERE id = %s
+                """
+                execute_query(restore_sql, (qty, qty, book_id))
+            except Exception as e:
+                # Log but do not block cancellation if inventory update fails.
+                print(f"Error restoring book availability on cancel: {e}")
             
             # Get user info
             session = LIBRARY_SESSIONS.get(session_id, {})

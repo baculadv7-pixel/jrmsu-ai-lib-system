@@ -451,7 +451,9 @@ export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-co
         });
         console.log('🚀 Calling onScanSuccess callback...');
         
-        // FORCE immediate callback execution
+        // FORCE immediate callback execution – this is the *only* place we call
+        // the parent onScanSuccess handler so that each QR detection is processed
+        // exactly once (prevents duplicated login/logout handling and double buttons).
         try {
           onScanSuccess(decodedText);
           console.log('✅ onScanSuccess callback completed successfully');
@@ -491,8 +493,6 @@ export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-co
             }
           }, 6000); // Extended timeout for login process
         }
-        
-        onScanSuccess(decodedText);
       };
       
       const onScanErrorCallback = (errorMessage: string) => {
@@ -813,6 +813,27 @@ export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-co
     await startScanner(selectedCamera);
   };
 
+  // Periodic health check: if the scanner has silently stopped while the QR
+  // login view is still mounted (for example after a long standby), attempt a
+  // gentle auto-restart. We only do this when there is no explicit error and
+  // the UI is not showing the manual "Restart Camera" button.
+  useEffect(() => {
+    const id = setInterval(() => {
+      try {
+        const inst = html5QrCodeRef.current;
+        if (!inst) return;
+        const state = inst.getState(); // 2 = SCANNING
+        if (state !== 2 && !isInitializing && !error && !showRestartButton) {
+          console.log('⚙️ QRScanner health check: not scanning, auto-restarting...');
+          void restartCamera();
+        }
+      } catch {
+        // Ignore health-check errors; the main scanner logic and error handler
+        // already surface real problems to the user.
+      }
+    }, 60000); // check roughly once per minute
+    return () => clearInterval(id);
+  }, [isInitializing, error, showRestartButton, selectedCamera]);
 
   // Initialize camera detection on component mount with DOM-ready safeguard
   useEffect(() => {
@@ -899,6 +920,7 @@ export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-co
       stopScanner();
     };
   }, []);
+
 
   // Force container visibility and video display when scanner is active/initializing
   useEffect(() => {

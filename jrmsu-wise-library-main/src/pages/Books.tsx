@@ -15,7 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import { useAuth } from "@/context/AuthContext";
-import { useEffect, useMemo, useState, useCallback } from "react";
+import { useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 import { BooksService, type BookRecord } from "@/services/books";
 import { NotificationsService } from "@/services/notifications";
@@ -68,6 +68,9 @@ const Books = () => {
   const [statsModal, setStatsModal] = useState<'total'|'available'|'categories'|'borrowed'|'reservations'|null>(null);
   const [borrowedRecords, setBorrowedRecords] = useState<BackendBorrowRecord[]>([]);
   const [reservationRecords, setReservationRecords] = useState<BackendReservationRecord[]>([]);
+  // Transient borrowed visual status when a book's available copies reach 0
+  const [tempBorrowedStatus, setTempBorrowedStatus] = useState<Record<string, boolean>>({});
+  const prevBooksRef = useRef<BookRecord[]>([]);
   const [reserveDialogOpen, setReserveDialogOpen] = useState(false);
   const [reserveTargetBook, setReserveTargetBook] = useState<BookRecord | null>(null);
   const [reserveQuantity, setReserveQuantity] = useState<number>(1);
@@ -273,6 +276,36 @@ const Books = () => {
       return () => clearTimeout(timer);
     }
   }, [searchQuery, useAISearch, handleAISearch]);
+
+  // When a book's available copies drop from >0 to 0 in this view, mark it
+  // as "borrowed" for 5 seconds, then treat as "unavailable".
+  useEffect(() => {
+    const prev = prevBooksRef.current;
+    const next = books;
+    const newlyZeroIds: string[] = [];
+
+    next.forEach((b) => {
+      const prevB = prev.find((p) => p.id === b.id);
+      if (prevB && prevB.available > 0 && b.available === 0) {
+        newlyZeroIds.push(b.id);
+      }
+    });
+
+    if (newlyZeroIds.length > 0) {
+      setTempBorrowedStatus((current) => {
+        const updated = { ...current };
+        newlyZeroIds.forEach((id) => {
+          updated[id] = true;
+          setTimeout(() => {
+            setTempBorrowedStatus((m) => ({ ...m, [id]: false }));
+          }, 5000);
+        });
+        return updated;
+      });
+    }
+
+    prevBooksRef.current = next;
+  }, [books]);
 
   const filtered = useMemo(() => {
     // Use AI search results if enabled and available
@@ -518,6 +551,7 @@ const Books = () => {
                       <TableHead>Category</TableHead>
                       <TableHead>Shelf</TableHead>
                       <TableHead>Status</TableHead>
+                      <TableHead>Copies</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -530,7 +564,24 @@ const Books = () => {
                         <TableCell>{book.category}</TableCell>
                         <TableCell>{book.shelf}</TableCell>
                         <TableCell>
-                          <Badge variant={book.status === "available" ? "default" : "secondary"}>{book.status}</Badge>
+                          {(() => {
+                            let displayStatus: 'available' | 'borrowed' | 'unavailable';
+                            if (book.available > 0) {
+                              displayStatus = 'available';
+                            } else {
+                              displayStatus = tempBorrowedStatus[book.id] ? 'borrowed' : 'unavailable';
+                            }
+                            const variant = displayStatus === 'available' ? 'default' : 'secondary';
+                            return (
+                              <Badge variant={variant}>{displayStatus}</Badge>
+                            );
+                          })()}
+                        </TableCell>
+                        <TableCell>
+                          <span className="text-sm">
+                            <span className="font-medium">{book.available}</span>
+                            <span className="text-muted-foreground"> / {book.copies}</span>
+                          </span>
                         </TableCell>
                         <TableCell className="text-right">
                           {(userType === "student" || userType === "admin") && (
@@ -586,7 +637,16 @@ const Books = () => {
                             <div><span className="text-muted-foreground">Category:</span> {b.category}</div>
                             <div><span className="text-muted-foreground">ISBN:</span> {b.isbn}</div>
                             <div><span className="text-muted-foreground">Shelf:</span> {b.shelf}</div>
-                            <div><span className="text-muted-foreground">Status:</span> <Badge variant={b.status==='available'?'default':'secondary'}>{b.status}</Badge></div>
+                            <div><span className="text-muted-foreground">Status:</span> {(() => {
+                              let displayStatus: 'available' | 'borrowed' | 'unavailable';
+                              if (b.available > 0) {
+                                displayStatus = 'available';
+                              } else {
+                                displayStatus = tempBorrowedStatus[b.id] ? 'borrowed' : 'unavailable';
+                              }
+                              const variant = displayStatus === 'available' ? 'default' : 'secondary';
+                              return <Badge variant={variant}>{displayStatus}</Badge>;
+                            })()}</div>
                           </div>
                           <div className="flex items-center justify-center">
                             <div className="h-32 w-32"><QRCodeDisplay data={JSON.stringify({t:'BOOK', id:b.id, title:b.title, author:b.author, category:b.category, isbn:b.isbn})} size={128} centerLabel="JRMSU–Library"/></div>

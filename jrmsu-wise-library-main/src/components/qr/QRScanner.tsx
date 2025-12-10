@@ -491,7 +491,8 @@ export function QRScanner({ onScanSuccess, onError }: QRScannerProps) {
           }, 6000); // Extended timeout for login process
         }
         
-        onScanSuccess(decodedText);
+        // NOTE: We intentionally do NOT stop the scanner here; it remains live
+        // so that the parent can choose how to react (e.g. login/logout flows).
       };
       
       const onScanErrorCallback = (errorMessage: string) => {

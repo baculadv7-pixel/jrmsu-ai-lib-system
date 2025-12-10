@@ -27,6 +27,14 @@ except Exception:
 
 app = Flask(__name__)
 
+# Register borrowing endpoints (/api/library/*) so Books, History, and stats work
+try:
+    from borrowing_endpoints import borrowing_bp
+    app.register_blueprint(borrowing_bp)
+    print("✅ Borrowing endpoints loaded (/api/library/*)")
+except Exception as e:
+    print(f"⚠️  Borrowing endpoints not loaded: {e}")
+
 # MySQL availability check (for health and logging)
 try:
     from db import test_connection
@@ -1325,6 +1333,17 @@ def list_users():
 
 @app.route('/api/users/<uid>')
 def get_user(uid: str):
+    """Fetch a user from the authoritative sources.
+
+    Order of truth:
+      1. MySQL admins table
+      2. MySQL students table
+      3. File-backed JSON users store (data.json)
+
+    If the user does not exist in ANY of these, we return 404 instead of a
+    fake placeholder object so that QR logins and other flows can reliably
+    detect "User not found or already deleted".
+    """
     # Try MySQL admin first
     try:
         arow = AdminDB.get_admin_by_id(uid)
@@ -1332,6 +1351,7 @@ def get_user(uid: str):
             return jsonify(_map_admin_row_to_user(arow))
     except Exception:
         pass
+
     # Then student
     try:
         row = StudentDB.get_student_by_id(uid)
@@ -1339,12 +1359,18 @@ def get_user(uid: str):
             return jsonify(_map_student_row_to_user(row))
     except Exception:
         pass
-    # Fallback to file-backed store
-    fdb = load_db()
-    u = fdb.get("users", {}).get(uid)
-    if not u:
-        u = {"id": uid}
-    return jsonify(u)
+
+    # Finally, file-backed JSON store (legacy/dev users)
+    try:
+        fdb = load_db()
+        u = fdb.get("users", {}).get(uid)
+        if u:
+            return jsonify(u)
+    except Exception:
+        pass
+
+    # Not found anywhere – this is treated as deleted / non-existent
+    return jsonify({"error": "User not found or already deleted"}), 404
 
 # ---------- Admin-specific API (maps to users with userType == 'admin') ----------
 
@@ -3314,6 +3340,114 @@ def api_books_delete(book_id: str):
         except Exception:
             pass
         return jsonify(ok=True)
+
+
+@app.route('/api/books/<book_id>', methods=['PUT', 'PATCH'])
+def api_books_update(book_id: str):
+    """Update an existing book's core fields (title, author, copies, status, etc.).
+
+    This is used by the Book Management UI when editing a book. It keeps the
+    MySQL `books` table and the lightweight JSON store in sync so that edits
+    (like changing author or copies) persist across refreshes and restarts.
+    """
+    body = request.get_json(force=True) or {}
+    title = (body.get('title') or '').strip()
+    author = (body.get('author') or '').strip()
+    category = (body.get('category') or '').strip()
+    isbn = (body.get('isbn') or '').strip()
+    shelf = (body.get('shelf') or body.get('shelf_location') or '').strip()
+    total = body.get('total_copies', body.get('copies'))
+    available = body.get('available_copies', body.get('available'))
+    status = body.get('status')
+
+    if not title or not author or not category:
+        return jsonify(error='title, author, and category are required'), 400
+
+    # Sanitize numeric fields
+    try:
+        if total is not None:
+            total = max(int(total), 1)
+    except Exception:
+        total = None
+    try:
+        if available is not None:
+            available = max(int(available), 0)
+    except Exception:
+        available = None
+
+    # MySQL-backed update when available
+    if MYSQL_AVAILABLE:
+        try:
+            # Build dynamic SET clause only for provided fields
+            sets = []
+            params = []
+            sets.append('title = %s'); params.append(title)
+            sets.append('author = %s'); params.append(author)
+            sets.append('category = %s'); params.append(category)
+            sets.append('isbn = %s'); params.append(isbn)
+            if shelf is not None:
+                sets.append('shelf_location = %s'); params.append(shelf)
+            if total is not None:
+                sets.append('total_copies = %s'); params.append(total)
+            if available is not None:
+                sets.append('available_copies = %s'); params.append(available)
+            if status is not None:
+                sets.append('status = %s'); params.append(status)
+
+            if not sets:
+                return jsonify(error='No updatable fields provided'), 400
+
+            params.append(book_id)
+            sql = f"UPDATE books SET {', '.join(sets)} WHERE id = %s"
+            execute_query(sql, tuple(params), fetch_all=False)
+            try:
+                _broadcast('book.updated', {'bookId': book_id})
+            except Exception:
+                pass
+        except Exception as e:
+            print(f"⚠️  /api/books/<id> MySQL update error: {e}")
+            # Fall through to file-backed update so UI still behaves in dev mode
+
+    # Always update file-backed store as well (dev/fallback)
+    try:
+        fdb = load_db()
+        books = fdb.setdefault('books', [])
+        found = False
+        for b in books:
+            bid = b.get('id') or b.get('bookId') or b.get('code')
+            if str(bid) == str(book_id):
+                b['title'] = title
+                b['author'] = author
+                b['category'] = category
+                b['isbn'] = isbn
+                if shelf is not None:
+                    b['shelf'] = shelf
+                if total is not None:
+                    b['copies'] = total
+                if available is not None:
+                    b['available'] = available
+                if status is not None:
+                    b['status'] = status
+                found = True
+                break
+        if not found:
+            # If not present, create a minimal record so cache stays consistent
+            books.append({
+                'id': book_id,
+                'title': title,
+                'author': author,
+                'category': category,
+                'isbn': isbn,
+                'shelf': shelf,
+                'copies': total or 1,
+                'available': available if available is not None else (total or 1),
+                'status': status or 'available',
+            })
+        save_db(fdb)
+    except Exception as e:
+        print(f"⚠️  /api/books/<id> file-store update error: {e}")
+
+    return jsonify(ok=True, id=book_id)
 
 @app.route('/api/auth/send-reset-email', methods=['POST'])
 def api_send_reset_email():

@@ -103,7 +103,45 @@ export const BooksService = {
     books.push({ ...book, createdAt: Date.now() });
     writeBooks(books);
   },
-  update(id: string, updates: Partial<BookRecord>) {
+  async update(id: string, updates: Partial<BookRecord>) {
+    // First, attempt to persist the update to the backend so changes survive
+    // refresh/restart and are visible across all clients.
+    try {
+      const payload: any = {
+        title: updates.title,
+        author: updates.author,
+        category: updates.category,
+        isbn: updates.isbn,
+        shelf: updates.shelf,
+        total_copies: updates.copies,
+        available_copies: updates.available,
+        status: updates.status,
+      };
+      // Remove undefined keys so we don't accidentally overwrite with nulls
+      Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k]);
+
+      const resp = await fetch(`${API.BACKEND.BASE}/api/books/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(payload),
+      });
+
+      if (!resp.ok) {
+        try {
+          const err = await resp.json();
+          throw new Error(err?.error || 'Failed to update book on server');
+        } catch {
+          throw new Error('Failed to update book on server');
+        }
+      }
+    } catch (e) {
+      // Log to console but still update local cache so UI remains responsive;
+      // remote failure will be visible next time data is fetched.
+      console.error('BooksService.update backend error:', e);
+    }
+
+    // Update local cached copy so UI reflects edits immediately.
     const books = readBooks();
     const idx = books.findIndex((b) => b.id === id);
     if (idx === -1) throw new Error("Book not found");

@@ -11,6 +11,9 @@ from typing import Dict, List, Optional
 
 import requests
 
+# Import central MySQL helpers so mirror always reflects "real" system state
+from db import StudentDB, AdminDB, execute_query
+
 # Create Blueprint
 mirror_api = Blueprint('mirror_api', __name__, url_prefix='/api')
 
@@ -526,26 +529,78 @@ def check_forgotten_logouts():
 # ==================== USER & BOOK INFO HELPERS ====================
 
 def get_user_info(user_id: str) -> Optional[Dict]:
-    """Get user information (integrate with your user service)"""
-    # TODO: Integrate with your actual user database
-    # This is a placeholder
-    return {
-        'id': user_id,
-        'fullName': 'Sample User',
-        'role': 'student' if user_id.startswith('KC-') else 'admin',
-        'email': f'{user_id.lower()}@jrmsu.edu.ph'
-    }
+    """Look up a user in the *real* JRMSU system.
+
+    This replaces the previous hard‑coded placeholder so that the mirror
+    dashboard (8081) always reflects the authoritative MySQL + JSON state.
+
+    The lookup order is:
+      1. Students table via StudentDB
+      2. Admins table via AdminDB
+
+    If the user cannot be found in either, we return None so that callers can
+    respond with a clear "User not found or already deleted" message.
+    """
+    # 1) Try students
+    try:
+        student = StudentDB.get_student_by_id(user_id)
+    except Exception:
+        student = None
+
+    if student:
+        full_name = f"{student.get('first_name','').strip()} {student.get('last_name','').strip()}".strip() or student.get('student_id', user_id)
+        return {
+            'id': student.get('student_id', user_id),
+            'fullName': full_name,
+            'role': 'student',
+            'email': student.get('email') or f"{user_id.lower()}@jrmsu.edu.ph",
+        }
+
+    # 2) Try admins
+    try:
+        admin = AdminDB.get_admin_by_id(user_id)
+    except Exception:
+        admin = None
+
+    if admin:
+        full_name = f"{admin.get('first_name','').strip()} {admin.get('last_name','').strip()}".strip() or admin.get('admin_id', user_id)
+        return {
+            'id': admin.get('admin_id') or admin.get('id') or user_id,
+            'fullName': full_name,
+            'role': 'admin',
+            'email': admin.get('email') or f"{user_id.lower()}@jrmsu.edu.ph",
+        }
+
+    # Not found in either table – treat as deleted / non‑existent
+    return None
 
 def get_book_info(book_id: str) -> Optional[Dict]:
-    """Get book information (integrate with your book service)"""
-    # TODO: Integrate with your actual book database
-    # This is a placeholder
+    """Look up a book in the main books table.
+
+    This ensures QR scans for books on the mirror kiosk always validate against
+    the same inventory that powers `/books` and `/book-management` in the
+    main app (8080).
+    """
+    try:
+        row = execute_query(
+            "SELECT book_id, title, author, isbn, available, copies, status FROM books WHERE book_id = %s",
+            (book_id,),
+            fetch_one=True,
+        )
+    except Exception:
+        row = None
+
+    if not row:
+        return None
+
     return {
-        'id': book_id,
-        'title': 'Sample Book Title',
-        'author': 'Sample Author',
-        'isbn': '1234567890',
-        'available': True
+        'id': row.get('book_id', book_id),
+        'title': row.get('title', ''),
+        'author': row.get('author', ''),
+        'isbn': row.get('isbn', ''),
+        'available': bool((row.get('available') or 0) > 0),
+        'copies': row.get('copies', 0),
+        'status': row.get('status', 'available'),
     }
 
 # ==================== EXPORT BLUEPRINT ====================

@@ -236,23 +236,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const token = `jwt.${btoa(`${dbUser.id}.${Date.now()}`)}`;
     localStorage.setItem('token', token);
 
-    localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
-    setUser(session);
+    // Before we fully accept the QR login, confirm the user still exists in the
+    // authoritative backend (MySQL + JSON). If the record was deleted from
+    // /students or /admins, this call will now return 404 and we treat the QR
+    // as invalid for login.
     try {
       const r = await fetch('http://localhost:5000/api/users/' + encodeURIComponent(dbUser.id));
-      if (r.ok) {
-        const backendUser: any = await r.json();
-        const merged: AuthUser = {
-          ...session,
-          ...backendUser,
-          twoFactorEnabled: Boolean(session.twoFactorEnabled || backendUser.twoFactorEnabled),
-          authKey:
-            (backendUser.twoFactorKey as string | undefined) ?? session.authKey,
-        };
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(merged));
-        setUser(merged);
+      if (!r.ok) {
+        // Deleted or not found in main DB/JSON
+        throw new Error('User not found or already deleted');
       }
-    } catch {}
+      const backendUser: any = await r.json();
+      const merged: AuthUser = {
+        ...session,
+        ...backendUser,
+        twoFactorEnabled: Boolean(session.twoFactorEnabled || backendUser.twoFactorEnabled),
+        authKey:
+          (backendUser.twoFactorKey as string | undefined) ?? session.authKey,
+      };
+      localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(merged));
+      setUser(merged);
+    } catch (err: any) {
+      console.error('QR login rejected by backend user check:', err);
+      localStorage.removeItem('token');
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      setUser(null);
+      throw new Error(err?.message || 'User not found or already deleted');
+    }
 
     try { ActivityService.log(dbUser.id, 'login', 'QR'); } catch { /* noop */ }
 

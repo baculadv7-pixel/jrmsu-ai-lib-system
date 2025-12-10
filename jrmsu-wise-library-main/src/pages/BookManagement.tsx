@@ -7,7 +7,7 @@ import { Search, BookPlus, Edit, Trash2, Download, QrCode, Plus, X } from "lucid
 import Navbar from "@/components/Layout/Navbar";
 import Sidebar from "@/components/Layout/Sidebar";
 import { useAuth } from "@/context/AuthContext";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BooksService, type BookRecord, type CustomColumn, buildBookQrPayload } from "@/services/books";
 import { connectDashboardRealtime } from "@/services/dashboardRealtime";
 import { API } from "@/config/api";
@@ -106,6 +106,11 @@ const BookManagement = () => {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [borrowedCount, setBorrowedCount] = useState(0);
   const [reservationCount, setReservationCount] = useState(0);
+  // Track transient "borrowed" visual state when a book's available copies
+  // drop to zero. This lets us show BORROWED for 5 seconds before switching
+  // to UNAVAILABLE in the UI.
+  const [tempBorrowedStatus, setTempBorrowedStatus] = useState<Record<string, boolean>>({});
+  const prevBooksRef = useRef<BookRecord[]>([]);
 
   // Hydrate admin preferences (run after state creation)
   useEffect(() => {
@@ -134,6 +139,37 @@ const BookManagement = () => {
       });
     } catch {}
   }, [user?.id, sortBy, sortOrder, filterCategory, filterAvailability]);
+
+  // Detect books whose available copies just transitioned from >0 to 0,
+  // and mark them as temporarily "borrowed" for 5 seconds.
+  useEffect(() => {
+    const prev = prevBooksRef.current;
+    const next = books;
+    const newlyZeroIds: string[] = [];
+
+    next.forEach((b) => {
+      const prevB = prev.find((p) => p.id === b.id);
+      if (prevB && prevB.available > 0 && b.available === 0) {
+        newlyZeroIds.push(b.id);
+      }
+    });
+
+    if (newlyZeroIds.length > 0) {
+      setTempBorrowedStatus((current) => {
+        const updated = { ...current };
+        newlyZeroIds.forEach((id) => {
+          // Set to true now and schedule auto-clear after 5 seconds.
+          updated[id] = true;
+          setTimeout(() => {
+            setTempBorrowedStatus((m) => ({ ...m, [id]: false }));
+          }, 5000);
+        });
+        return updated;
+      });
+    }
+
+    prevBooksRef.current = next;
+  }, [books]);
 
   const filtered = useMemo(() => {
     const q = searchTerm.toLowerCase();
@@ -177,13 +213,13 @@ const BookManagement = () => {
     setIsEditOpen(true);
   };
   
-  const onSaveEdit = () => {
+  const onSaveEdit = async () => {
     if (!draft.id || !draft.title || !draft.author || !draft.category) {
       toast({ title: "Validation Error", description: "Please fill in all required fields", variant: "destructive" });
       return;
     }
     try {
-      BooksService.update(draft.id, draft);
+      await BooksService.update(draft.id, draft);
       loadData();
       setIsEditOpen(false);
       setEditingBook(null);
@@ -583,15 +619,27 @@ const BookManagement = () => {
                             </div>
                           </td>
                           <td className="p-3 text-center whitespace-nowrap">
-                            <Badge
-                              className={
-                                book.status === "available"
-                                  ? "bg-leaf text-white"
-                                  : "bg-destructive text-white"
+                            {(() => {
+                              // Derive display status from available copies plus the
+                              // temporary "borrowed" window when copies just hit zero.
+                              let displayStatus: 'available' | 'borrowed' | 'unavailable';
+                              if (book.available > 0) {
+                                displayStatus = 'available';
+                              } else {
+                                displayStatus = tempBorrowedStatus[book.id] ? 'borrowed' : 'unavailable';
                               }
-                            >
-                              {book.status.toUpperCase()}
-                            </Badge>
+                              const badgeClass =
+                                displayStatus === 'available'
+                                  ? 'bg-leaf text-white'
+                                  : displayStatus === 'borrowed'
+                                  ? 'bg-primary text-white'
+                                  : 'bg-destructive text-white';
+                              return (
+                                <Badge className={badgeClass}>
+                                  {displayStatus.toUpperCase()}
+                                </Badge>
+                              );
+                            })()}
                           </td>
                           <td className="p-3 text-center whitespace-nowrap">
                             <div className="flex gap-2">
