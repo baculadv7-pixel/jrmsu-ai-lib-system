@@ -76,12 +76,21 @@ The system includes the following major subsystems:
   - QR-based book scanning dialogs (`src/components/library/BookScannerDialog.tsx`, `src/components/qr/QRScanner.tsx`)
   - Borrow/return prompts when logging in or out with outstanding reservations/borrows
 
-- **AI Server**  
+|- **AI Server**  
   Path: `ai_server/`  
   Technologies: Python + Flask, LLM via Ollama or HTTP API  
   Files:
   - `ai_server/app.py` – exposes AI assistant HTTP endpoints
   - `system_knowledge.json` – curated JRMSU Library domain knowledge used for grounded responses
+
+- **Desktop App (Electron Wrapper)**  
+  Path: `DesktopappLibrary/`  
+  Technologies: Electron (Node + Chromium)  
+  Files:
+  - `DesktopappLibrary/main.js` – Electron main process that loads the same JRMSU web UI inside a desktop window
+  - `DesktopappLibrary/package.json` – scripts (`npm run start`, `npm run dist`) and Electron/electron-builder config
+  
+  The desktop app is a **thin wrapper** around the existing web frontend. It connects to the **same Python backend** at `http://localhost:5000` and therefore uses the **same MySQL database (`jrmsu_library`)** as the main web app and mirror page. Any changes made via the desktop app (logins, reservations, borrows, returns, notifications) are immediately reflected in the web app and vice versa.
 
 - **Root Scripts and Data**  
   At repo root (`COMPREHENSIVE_SYSTEM_CHECK.py`, SQL files, Excel geography and address data), used to:

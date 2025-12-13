@@ -1288,6 +1288,25 @@ try:
 except Exception as e:
     print(f'⚠️  Library session endpoints not loaded (app): {e}')
 
+# Register DB-backed library endpoints (reserve/borrow/return/status) when missing.
+# This is important for the mirror book scanner which calls /api/library/borrow-book.
+try:
+    def _has_route(path: str, method: str = 'GET') -> bool:
+        try:
+            for rule in app.url_map.iter_rules():
+                if rule.rule == path and method.upper() in (rule.methods or set()):
+                    return True
+        except Exception:
+            return False
+        return False
+
+    if not _has_route('/api/library/borrow-book', 'POST'):
+        from library_endpoints import register_library_endpoints
+        register_library_endpoints(app)
+        print('✅ Library endpoints loaded (app)')
+except Exception as e:
+    print(f'⚠️  Library endpoints not loaded (app): {e}')
+
 # Register 2FA endpoints for persistence
 try:
     from twofa_endpoints import register_twofa_endpoints
@@ -1415,13 +1434,14 @@ def admins_2fa_verify(admin_id: str):
     save_db(db)
 
     # Persist to MySQL when available so 2FA state survives restarts
+    # NOTE: schema uses `two_factor_secret` (not two_factor_key)
     if MYSQL_AVAILABLE:
         try:
             execute_query(
                 """
                 UPDATE admins
                 SET two_factor_enabled = 1,
-                    two_factor_key = %s
+                    two_factor_secret = %s
                 WHERE admin_id = %s OR id = %s
                 """,
                 (secret, admin_id, admin_id),
@@ -1450,7 +1470,7 @@ def admins_2fa_disable(admin_id: str):
                 """
                 UPDATE admins
                 SET two_factor_enabled = 0,
-                    two_factor_key = NULL
+                    two_factor_secret = NULL
                 WHERE admin_id = %s OR id = %s
                 """,
                 (admin_id, admin_id),
@@ -1773,7 +1793,7 @@ def students_2fa_verify(student_id: str):
                 """
                 UPDATE students
                 SET two_factor_enabled = 1,
-                    two_factor_key = %s
+                    two_factor_secret = %s
                 WHERE student_id = %s OR id = %s
                 """,
                 (secret, student_id, student_id),
@@ -1802,7 +1822,7 @@ def students_2fa_disable(student_id: str):
                 """
                 UPDATE students
                 SET two_factor_enabled = 0,
-                    two_factor_key = NULL
+                    two_factor_secret = NULL
                 WHERE student_id = %s OR id = %s
                 """,
                 (student_id, student_id),
@@ -2160,6 +2180,7 @@ def toggle_2fa(uid: str):
     secret = (body.get('secret') or '').strip() or None
 
     # Update primary MySQL store when available so 2FA state survives restarts
+    # NOTE: schema uses `two_factor_secret` (not two_factor_key)
     if MYSQL_AVAILABLE:
         # Try admin first
         try:
@@ -2172,10 +2193,10 @@ def toggle_2fa(uid: str):
                     """
                     UPDATE admins
                     SET two_factor_enabled = %s,
-                        two_factor_key = %s
+                        two_factor_secret = %s
                     WHERE admin_id = %s OR id = %s
                     """,
-                    (1 if enabled else 0, secret, uid, uid),
+                    (1 if enabled else 0, secret if enabled else None, uid, uid),
                 )
             except Exception as e:
                 print(f"\u26a0\ufe0f toggle_2fa admin DB update failed: {e}")
@@ -2191,10 +2212,10 @@ def toggle_2fa(uid: str):
                         """
                         UPDATE students
                         SET two_factor_enabled = %s,
-                            two_factor_key = %s
+                            two_factor_secret = %s
                         WHERE student_id = %s OR id = %s
                         """,
-                        (1 if enabled else 0, secret, uid, uid),
+                        (1 if enabled else 0, secret if enabled else None, uid, uid),
                     )
                 except Exception as e:
                     print(f"\u26a0\ufe0f toggle_2fa student DB update failed: {e}")
@@ -2214,6 +2235,70 @@ def toggle_2fa(uid: str):
     log_activity(uid, '2fa_enable' if enabled else '2fa_disable')
     _emit('user.2fa', uid, {"enabled": enabled})
     return jsonify(ok=True)
+
+# ---------- Library compatibility endpoints ----------
+
+@app.route('/api/library/mark-returned', methods=['POST'])
+def api_library_mark_returned():
+    """Mark a borrow record as returned (History page admin action).
+
+    Frontend expects:
+      POST /api/library/mark-returned { borrowId: string }
+
+    Works with the main schema used by library_endpoints.py:
+      - borrow_records: borrow_id, book_id, status, returned_at
+      - books: id, available_copies, total_copies
+    """
+    body = request.get_json(force=True) or {}
+    borrow_id = (body.get('borrowId') or body.get('borrow_id') or '').strip()
+    if not borrow_id:
+        return jsonify(error='Missing borrowId'), 400
+
+    try:
+        # Load borrow record
+        br = execute_query(
+            """
+            SELECT id, borrow_id, book_id, status, returned_at
+            FROM borrow_records
+            WHERE borrow_id = %s
+            LIMIT 1
+            """,
+            (borrow_id,),
+            fetch_one=True,
+        )
+        if not br:
+            return jsonify(error='Borrow record not found'), 404
+
+        if (br.get('status') or '') == 'returned' or br.get('returned_at') is not None:
+            return jsonify(error='Book already returned'), 409
+
+        # Mark returned
+        execute_query(
+            """
+            UPDATE borrow_records
+            SET status = 'returned', returned_at = NOW()
+            WHERE borrow_id = %s
+            """,
+            (borrow_id,),
+        )
+
+        # Restore inventory
+        book_id = br.get('book_id')
+        if book_id:
+            execute_query(
+                """
+                UPDATE books
+                SET available_copies = LEAST(total_copies, IFNULL(available_copies, 0) + 1),
+                    status = 'available'
+                WHERE id = %s
+                """,
+                (book_id,),
+            )
+
+        return jsonify(ok=True, message='Book marked as returned', borrowId=borrow_id)
+    except Exception as e:
+        return jsonify(error='Return marking failed', details=str(e)), 500
+
 
 # ---------- Books API (for Jose + frontend sync) ----------
 
@@ -3247,77 +3332,158 @@ def api_auth_login():
 # -------------------- Books API (minimal) --------------------
 @app.route('/api/books', methods=['GET'])
 def api_books_list():
-    try:
-        rows = execute_query(
-            "SELECT id, title, author, category, isbn, publisher, publication_year, total_copies, available_copies, status FROM books ORDER BY title",
-            fetch_all=True
-        ) or []
-        return jsonify(items=rows)
-    except Exception:
-        # Fallback to file-backed store
-        fdb = load_db()
-        books = fdb.get('books', []) or []
-        # Normalize keys similar to DB
-        data = []
-        for b in books:
-            data.append({
-                'id': b.get('id') or b.get('bookId') or b.get('code'),
-                'title': b.get('title'),
-                'author': b.get('author'),
-                'category': b.get('category') or b.get('genre'),
-                'isbn': b.get('isbn'),
-                'publisher': b.get('publisher'),
-                'publication_year': b.get('publication_year'),
-                'total_copies': b.get('copies') or b.get('total_copies') or 1,
-                'available_copies': b.get('available') or b.get('available_copies') or 1,
-                'status': b.get('status') or 'available',
-            })
-        return jsonify(items=data)
+    """List books from MySQL when possible.
+
+    IMPORTANT: We support multiple historical schemas for `books`.
+    If optional columns (publisher/publication_year/etc.) don't exist, we fall back
+    to the minimal schema used by `library_endpoints.py`.
+    """
+    # Prefer MySQL
+    if MYSQL_AVAILABLE:
+        # Try "newer"/richer schema first
+        try:
+            rows = execute_query(
+                "SELECT id, title, author, category, isbn, publisher, publication_year, total_copies, available_copies, status FROM books ORDER BY title",
+                fetch_all=True,
+            ) or []
+            return jsonify(items=rows)
+        except Exception:
+            # Fall back to minimal schema
+            try:
+                rows = execute_query(
+                    "SELECT id, title, author, category, isbn, shelf, total_copies, available_copies, status FROM books ORDER BY title",
+                    fetch_all=True,
+                ) or []
+                # Keep response shape stable for the frontend
+                mapped = []
+                for r in rows:
+                    mapped.append({
+                        **r,
+                        'publisher': r.get('publisher') if isinstance(r, dict) else None,
+                        'publication_year': r.get('publication_year') if isinstance(r, dict) else None,
+                    })
+                return jsonify(items=mapped)
+            except Exception as e:
+                print(f"⚠️  /api/books MySQL list failed: {e}")
+
+    # Fallback to file-backed store
+    fdb = load_db()
+    books = fdb.get('books', []) or []
+    # Normalize keys similar to DB
+    data = []
+    for b in books:
+        data.append({
+            'id': b.get('id') or b.get('bookId') or b.get('code'),
+            'title': b.get('title'),
+            'author': b.get('author'),
+            'category': b.get('category') or b.get('genre'),
+            'isbn': b.get('isbn'),
+            'publisher': b.get('publisher'),
+            'publication_year': b.get('publication_year'),
+            'total_copies': b.get('copies') or b.get('total_copies') or 1,
+            'available_copies': b.get('available') or b.get('available_copies') or 1,
+            'status': b.get('status') or 'available',
+        })
+    return jsonify(items=data)
 
 @app.route('/api/books', methods=['POST'])
 def api_books_create():
+    """Create a new book.
+
+    This endpoint MUST write to MySQL when MySQL is available; otherwise newly
+    registered books will not be borrowable/reservable because /api/library/*
+    endpoints read from the MySQL `books` table.
+
+    We support multiple historical `books` schemas by retrying inserts when
+    optional columns (publisher/publication_year/etc.) don't exist.
+    """
     body = request.get_json(force=True) or {}
     book_id = (body.get('id') or body.get('book_id') or '').strip()
     title = (body.get('title') or '').strip()
     author = (body.get('author') or '').strip()
     category = (body.get('category') or '').strip()
     isbn = (body.get('isbn') or '').strip()
+    shelf = (body.get('shelf') or body.get('shelf_location') or '').strip()
     publisher = (body.get('publisher') or '').strip()
     pub_year = body.get('publication_year')
-    total = int(body.get('total_copies') or body.get('copies') or 1)
-    available = int(body.get('available_copies') or body.get('available') or total)
-    status = body.get('status') or ('available' if available > 0 else 'unavailable')
-    if not book_id or not title:
-        return jsonify(error='id and title required'), 400
+
     try:
-        execute_query(
-            """
-            INSERT INTO books (id, title, author, isbn, category, publisher, publication_year, total_copies, available_copies, status)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            (book_id, title, author, isbn, category, publisher, pub_year, total, available, status)
-        )
+        total = int(body.get('total_copies') or body.get('copies') or 1)
+    except Exception:
+        total = 1
+    try:
+        available = int(body.get('available_copies') or body.get('available') or total)
+    except Exception:
+        available = total
+
+    if total < 1:
+        total = 1
+    if available < 0:
+        available = 0
+
+    status = body.get('status') or ('available' if available > 0 else 'unavailable')
+
+    if not book_id or not title or not author or not category:
+        return jsonify(error='id, title, author, and category are required'), 400
+
+    # Prefer MySQL so book is borrowable/reservable
+    if MYSQL_AVAILABLE:
+        # Attempt richer schema first
+        try:
+            execute_query(
+                """
+                INSERT INTO books (id, title, author, isbn, category, publisher, publication_year, total_copies, available_copies, status)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (book_id, title, author, isbn, category, publisher, pub_year, total, available, status),
+            )
+        except Exception as e:
+            msg = str(e)
+            # Retry minimal schema (id,title,author,category,isbn,shelf,total_copies,available_copies,status)
+            if 'Unknown column' in msg or 'doesn\'t exist' in msg:
+                try:
+                    execute_query(
+                        """
+                        INSERT INTO books (id, title, author, category, isbn, shelf, total_copies, available_copies, status)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        """,
+                        (book_id, title, author, category, isbn, shelf, total, available, status),
+                    )
+                except Exception as e2:
+                    return jsonify(error='Failed to create book in MySQL', details=str(e2)), 500
+            else:
+                return jsonify(error='Failed to create book in MySQL', details=msg), 500
+
         try:
             _broadcast('book.added', {'bookId': book_id})
         except Exception:
             pass
         return jsonify(ok=True, id=book_id)
-    except Exception as e:
-        # Fallback to file-backed store
-        fdb = load_db()
-        books = fdb.setdefault('books', [])
-        if any((x.get('id') or x.get('bookId')) == book_id for x in books):
-            return jsonify(error='duplicate id'), 400
-        books.append({
-            'id': book_id, 'title': title, 'author': author, 'isbn': isbn, 'category': category,
-            'publisher': publisher, 'publication_year': pub_year, 'copies': total, 'available': available, 'status': status
-        })
-        save_db(fdb)
-        try:
-            _broadcast('book.added', {'bookId': book_id})
-        except Exception:
-            pass
-        return jsonify(ok=True, id=book_id)
+
+    # MySQL not available -> file-backed fallback
+    fdb = load_db()
+    books = fdb.setdefault('books', [])
+    if any((x.get('id') or x.get('bookId')) == book_id for x in books):
+        return jsonify(error='duplicate id'), 400
+    books.append({
+        'id': book_id,
+        'title': title,
+        'author': author,
+        'isbn': isbn,
+        'category': category,
+        'shelf': shelf,
+        'publisher': publisher,
+        'publication_year': pub_year,
+        'copies': total,
+        'available': available,
+        'status': status,
+    })
+    save_db(fdb)
+    try:
+        _broadcast('book.added', {'bookId': book_id})
+    except Exception:
+        pass
+    return jsonify(ok=True, id=book_id)
 
 @app.route('/api/books/<book_id>', methods=['DELETE'])
 def api_books_delete(book_id: str):
@@ -3344,11 +3510,9 @@ def api_books_delete(book_id: str):
 
 @app.route('/api/books/<book_id>', methods=['PUT', 'PATCH'])
 def api_books_update(book_id: str):
-    """Update an existing book's core fields (title, author, copies, status, etc.).
+    """Update an existing book's core fields.
 
-    This is used by the Book Management UI when editing a book. It keeps the
-    MySQL `books` table and the lightweight JSON store in sync so that edits
-    (like changing author or copies) persist across refreshes and restarts.
+    Supports both "new" schemas (shelf_location) and minimal schemas (shelf).
     """
     body = request.get_json(force=True) or {}
     title = (body.get('title') or '').strip()
@@ -3377,36 +3541,51 @@ def api_books_update(book_id: str):
 
     # MySQL-backed update when available
     if MYSQL_AVAILABLE:
-        try:
-            # Build dynamic SET clause only for provided fields
-            sets = []
-            params = []
-            sets.append('title = %s'); params.append(title)
-            sets.append('author = %s'); params.append(author)
-            sets.append('category = %s'); params.append(category)
-            sets.append('isbn = %s'); params.append(isbn)
-            if shelf is not None:
-                sets.append('shelf_location = %s'); params.append(shelf)
-            if total is not None:
-                sets.append('total_copies = %s'); params.append(total)
-            if available is not None:
-                sets.append('available_copies = %s'); params.append(available)
-            if status is not None:
-                sets.append('status = %s'); params.append(status)
+        # Build dynamic SET clause only for provided fields
+        sets = []
+        params = []
+        sets.append('title = %s'); params.append(title)
+        sets.append('author = %s'); params.append(author)
+        sets.append('category = %s'); params.append(category)
+        sets.append('isbn = %s'); params.append(isbn)
+        if total is not None:
+            sets.append('total_copies = %s'); params.append(total)
+        if available is not None:
+            sets.append('available_copies = %s'); params.append(available)
+        if status is not None:
+            sets.append('status = %s'); params.append(status)
 
-            if not sets:
-                return jsonify(error='No updatable fields provided'), 400
+        params.append(book_id)
 
-            params.append(book_id)
-            sql = f"UPDATE books SET {', '.join(sets)} WHERE id = %s"
-            execute_query(sql, tuple(params), fetch_all=False)
+        # Try shelf_location first, fall back to shelf
+        if shelf is not None:
             try:
-                _broadcast('book.updated', {'bookId': book_id})
-            except Exception:
-                pass
-        except Exception as e:
-            print(f"⚠️  /api/books/<id> MySQL update error: {e}")
-            # Fall through to file-backed update so UI still behaves in dev mode
+                sql = f"UPDATE books SET {', '.join(sets + ['shelf_location = %s'])} WHERE id = %s"
+                execute_query(sql, tuple(params[:-1] + [shelf] + [params[-1]]), fetch_all=False)
+            except Exception as e:
+                msg = str(e)
+                if 'Unknown column' in msg or 'doesn\'t exist' in msg:
+                    try:
+                        sql = f"UPDATE books SET {', '.join(sets + ['shelf = %s'])} WHERE id = %s"
+                        execute_query(sql, tuple(params[:-1] + [shelf] + [params[-1]]), fetch_all=False)
+                    except Exception as e2:
+                        print(f"⚠️  /api/books/<id> MySQL update error: {e2}")
+                else:
+                    print(f"⚠️  /api/books/<id> MySQL update error: {e}")
+        else:
+            try:
+                sql = f"UPDATE books SET {', '.join(sets)} WHERE id = %s"
+                execute_query(sql, tuple(params), fetch_all=False)
+            except Exception as e:
+                print(f"⚠️  /api/books/<id> MySQL update error: {e}")
+
+        try:
+            _broadcast('book.updated', {'bookId': book_id})
+        except Exception:
+            pass
+
+        # Even if MySQL update fails, we still proceed with file-backed update
+        # so UI remains responsive in dev mode.
 
     # Always update file-backed store as well (dev/fallback)
     try:

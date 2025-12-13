@@ -140,14 +140,15 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess, onBeginLogoutFlow 
 
   // FORCE AUTO-LOGIN with comprehensive debugging (defined before handlers to avoid TDZ)
   const proceedWithAutoLogin = useCallback(async (loginData: QRLoginData) => {
-    console.log('🚀 ========= FORCING QR AUTO-LOGIN ========');
+    console.log('🚀 ========= FORCING QR AUTO-LOGIN (MIRROR) ========');
     console.log('📋 QR Login Data received:', JSON.stringify(loginData, null, 2));
     
-    // Check if user is already logged in
+    // Use backend + local session status to decide: if user currently has an
+    // active library session, treat this scan as LOGOUT; otherwise LOGIN.
     const isLoggedIn = await checkScannedUserSession(loginData.userId);
-    
+
     if (isLoggedIn) {
-      console.log('⚠️ User is already logged in - initiating logout');
+      console.log('⚠️ User has active library session - treating scan as QR LOGOUT (toggle).');
       await handleQRLogout(loginData);
       return;
     }
@@ -176,18 +177,19 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess, onBeginLogoutFlow 
       const firstName = loginData.fullName.split(' ')[0] || 'User';
       console.log('👤 Extracted first name:', firstName);
       
-      // Create library session
+      // Create /api/library/login session so that Active Sessions view and
+      // odd/even audit logic stay in sync with the main system.
       try {
-        console.log('📚 Creating library session...');
+        console.log('📚 Creating library session (mirror)...');
         await createSession(loginData.userId, loginData.userType, loginData.fullName, 'qr');
-        console.log('✅ Library session created successfully');
+        console.log('✅ Library session created successfully (mirror)');
         
-        // Check for reservations and borrowed books
+        // Optionally check reservations / borrowed books for logging only.
         const status = await checkUserStatus(loginData.userId);
-        console.log('📋 User status:', status);
+        console.log('📋 User status (mirror login):', status);
       } catch (libErr: any) {
-        console.error('⚠️ Library session creation failed:', libErr);
-        // Continue with login even if library session fails
+        console.error('⚠️ Library session creation failed (mirror):', libErr);
+        // Continue with login even if library session fails.
       }
       
       // Log successful login for audit trail
@@ -251,7 +253,7 @@ export function QRCodeLogin({ onBackToManual, onLoginSuccess, onBeginLogoutFlow 
       setIsLoggingIn(false);
       console.log('🔄 Auto-login process completed (success or failure)');
     }
-  }, [signInWithQR, showWelcome, toast, verifyTotp, checkScannedUserSession, handleQRLogout, createSession, checkUserStatus]);
+  }, [signInWithQR, showWelcome, toast, verifyTotp, handleQRLogout, createSession, checkUserStatus, checkScannedUserSession]);
 
   // Handle detected QR code with enhanced error handling
   const handleQRDetected = useCallback(async (qrData: string) => {

@@ -151,13 +151,25 @@ export function LibrarySessionProvider({ children }: { children: ReactNode }) {
   const forceLogoutUser = async (userId: string) => {
     try {
       const r = await fetch(`${API_BASE}/api/library/logout`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId })
       });
-      if (!r.ok) return false;
-      if (session?.userId === userId) setSession(null);
+
+      // Treat "no active session" (404) as a successful logout so that QR
+      // logout remains idempotent and users don't get stuck needing to toggle
+      // manual/QR modes just to clear a phantom session.
+      if (!r.ok && r.status !== 404) {
+        return false;
+      }
+
+      if (session?.userId === userId) {
+        setSession(null);
+      }
+
       return true;
-    } catch {
+    } catch (e) {
+      console.error('forceLogoutUser failed:', e);
       return false;
     }
   };
@@ -224,18 +236,37 @@ export function LibrarySessionProvider({ children }: { children: ReactNode }) {
 
   const borrowBook = async (bookId: string) => {
     try {
+      const userId = session?.userId;
+      const sessionId = session?.sessionId;
+      if (!userId) {
+        throw new Error('No active library session (missing userId)');
+      }
+      if (!bookId) {
+        throw new Error('Missing bookId');
+      }
+
       const response = await fetch(`${API_BASE}/api/library/borrow-book`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId: session?.userId, 
+        body: JSON.stringify({
+          userId,
           bookId,
-          sessionId: session?.sessionId 
-        })
+          sessionId,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to borrow book');
+        let msg = `Failed to borrow book (HTTP ${response.status})`;
+        try {
+          const data = await response.json();
+          msg = data?.error || data?.message || msg;
+        } catch {
+          try {
+            const text = await response.text();
+            if (text) msg = text;
+          } catch {}
+        }
+        throw new Error(msg);
       }
 
       console.log('✅ Book borrowed successfully');
@@ -247,18 +278,37 @@ export function LibrarySessionProvider({ children }: { children: ReactNode }) {
 
   const returnBook = async (bookId: string) => {
     try {
+      const userId = session?.userId;
+      const sessionId = session?.sessionId;
+      if (!userId) {
+        throw new Error('No active library session (missing userId)');
+      }
+      if (!bookId) {
+        throw new Error('Missing bookId');
+      }
+
       const response = await fetch(`${API_BASE}/api/library/return-book`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          userId: session?.userId, 
+        body: JSON.stringify({
+          userId,
           bookId,
-          sessionId: session?.sessionId 
-        })
+          sessionId,
+        }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to return book');
+        let msg = `Failed to return book (HTTP ${response.status})`;
+        try {
+          const data = await response.json();
+          msg = data?.error || data?.message || msg;
+        } catch {
+          try {
+            const text = await response.text();
+            if (text) msg = text;
+          } catch {}
+        }
+        throw new Error(msg);
       }
 
       console.log('✅ Book returned successfully');

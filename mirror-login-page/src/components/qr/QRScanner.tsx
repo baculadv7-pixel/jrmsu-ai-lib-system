@@ -73,6 +73,8 @@ export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-co
   const zoomCooldownRef = useRef<number>(0);
   // Smoothing for overlay movement
   const prevCornersRef = useRef<any | null>(null);
+  // Track last time we saw any camera/detection activity for health checks
+  const lastActivityRef = useRef<number>(Date.now());
 
   const drawOverlay = (loc: any) => {
     const canvas = overlayCanvasRef.current;
@@ -450,6 +452,9 @@ export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-co
           fullData: decodedText
         });
         console.log('🚀 Calling onScanSuccess callback...');
+
+        // Mark scanner as active and healthy for the health-check timer
+        lastActivityRef.current = Date.now();
         
         // FORCE immediate callback execution – this is the *only* place we call
         // the parent onScanSuccess handler so that each QR detection is processed
@@ -625,6 +630,9 @@ export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-co
           const video = container?.querySelector('video') as HTMLVideoElement;
           
           if (video && video.videoWidth > 0 && video.videoHeight > 0) {
+            // Mark that we still have a live video feed for inactivity checks
+            lastActivityRef.current = Date.now();
+
             // Create canvas to capture video frame
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
@@ -815,23 +823,45 @@ export function QRScanner({ onScanSuccess, onError, containerId = 'qr-scanner-co
 
   // Periodic health check: if the scanner has silently stopped while the QR
   // login view is still mounted (for example after a long standby), attempt a
-  // gentle auto-restart. We only do this when there is no explicit error and
-  // the UI is not showing the manual "Restart Camera" button.
+  // gentle auto-restart. We consider both the Html5Qrcode state and recent
+  // camera activity so that long idle periods auto-heal without the user having
+  // to toggle to the manual login view.
   useEffect(() => {
+    const HEALTH_CHECK_INTERVAL_MS = 60000;      // run every ~60s
+    const MAX_INACTIVITY_MS = 120000;           // >2 minutes without activity => restart
+
     const id = setInterval(() => {
       try {
         const inst = html5QrCodeRef.current;
         if (!inst) return;
+
         const state = inst.getState(); // 2 = SCANNING
-        if (state !== 2 && !isInitializing && !error && !showRestartButton) {
-          console.log('⚙️ QRScanner health check: not scanning, auto-restarting...');
+        const now = Date.now();
+        const lastActivity = lastActivityRef.current;
+        const inactiveFor = now - lastActivity;
+
+        // Only try to auto-restart when the scanner is expected to be healthy
+        const canAutoRestart = !isInitializing && !error && !showRestartButton;
+
+        // A: Html5Qrcode is no longer in SCANNING state.
+        const stateBroken = state !== 2;
+
+        // B: Html5Qrcode still reports SCANNING but we've seen no live frames or
+        // detections for a long time (tab slept, driver glitch, etc.).
+        const silentlyDead = state === 2 && inactiveFor > MAX_INACTIVITY_MS;
+
+        if (canAutoRestart && (stateBroken || silentlyDead)) {
+          console.log('⚙️ QRScanner health check: auto-restarting...', { state, inactiveFor });
+          // Prevent tight restart loops if the restart itself fails.
+          lastActivityRef.current = Date.now();
           void restartCamera();
         }
       } catch {
         // Ignore health-check errors; the main scanner logic and error handler
         // already surface real problems to the user.
       }
-    }, 60000); // check roughly once per minute
+    }, HEALTH_CHECK_INTERVAL_MS);
+
     return () => clearInterval(id);
   }, [isInitializing, error, showRestartButton, selectedCamera]);
 

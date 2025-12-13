@@ -43,11 +43,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Persist session across refresh: if AUTH storage missing but token exists, hydrate from token
+    // Then: always re-hydrate 2FA enabled/disabled from backend so it cannot "flip" after restarts.
+    const hydrate2FAFromBackend = async (userId: string) => {
+      try {
+        const r = await fetch('http://localhost:5000/api/users/' + encodeURIComponent(userId));
+        if (!r.ok) return;
+        const backendUser: any = await r.json();
+        setUser((prev) => {
+          if (!prev || prev.id !== userId) return prev;
+          const merged: AuthUser = {
+            ...prev,
+            ...backendUser,
+            // Backend is the single source of truth for enabled/disabled
+            twoFactorEnabled: Boolean(backendUser.twoFactorEnabled),
+            // Keep existing secret unless backend explicitly provides one
+            authKey: (backendUser.twoFactorKey as string | undefined) ?? prev.authKey,
+          };
+          try {
+            localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+      } catch {
+        // ignore; offline/dev mode
+      }
+    };
+
     try {
       const rawSession = localStorage.getItem(AUTH_STORAGE_KEY);
       if (rawSession) {
         const parsed = JSON.parse(rawSession) as AuthUser;
         setUser(parsed);
+        // Make backend authoritative after refresh/restart
+        if (parsed?.id) {
+          void hydrate2FAFromBackend(parsed.id);
+        }
       } else {
         const token = localStorage.getItem('token');
         if (token && token.startsWith('jwt.')) {
@@ -61,6 +91,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 const session: AuthUser = { ...dbUser, role: dbUser.userType as UserRole, authKey: dbUser.twoFactorKey };
                 localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session));
                 setUser(session);
+                void hydrate2FAFromBackend(userId);
               }
             }
           } catch { /* noop */ }
@@ -250,7 +281,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const merged: AuthUser = {
         ...session,
         ...backendUser,
-        twoFactorEnabled: Boolean(session.twoFactorEnabled || backendUser.twoFactorEnabled),
+        // Backend is authoritative; never OR with stale local session
+        twoFactorEnabled: Boolean(backendUser.twoFactorEnabled),
         authKey:
           (backendUser.twoFactorKey as string | undefined) ?? session.authKey,
       };

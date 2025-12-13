@@ -145,26 +145,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
       } catch {}
 
-      // 2) If password-based login fails (legacy users), try role-specific lookups
-      const endpoints = role === 'admin'
-        ? [`${base}/api/admins/${encodeURIComponent(id)}`, `${base}/api/students/${encodeURIComponent(id)}`]
-        : [`${base}/api/students/${encodeURIComponent(id)}`, `${base}/api/admins/${encodeURIComponent(id)}`];
+      // 2) Preferred fallback: unified /api/users/<id> (covers MySQL + file-backed users)
+      // This avoids noisy 404 probes against /api/students and /api/admins.
       let backendUser: any = null;
-      for (const url of endpoints) {
-        try {
-          const res = await fetch(url);
-          if (res.ok) { backendUser = await res.json(); break; }
-        } catch { /* ignore and try next */ }
-      }
+      try {
+        const res = await fetch(`${base}/api/users/` + encodeURIComponent(id));
+        if (res.ok) {
+          backendUser = await res.json();
+        }
+      } catch { /* ignore */ }
 
-      // 3) Final backend fallback: unified /api/users/<id> (covers file-backed + DB users)
+      // 3) Legacy fallback: role-specific endpoints (some deployments still expose these)
       if (!backendUser) {
-        try {
-          const res = await fetch(`${base}/api/users/` + encodeURIComponent(id));
-          if (res.ok) {
-            backendUser = await res.json();
-          }
-        } catch { /* ignore */ }
+        const endpoints = role === 'admin'
+          ? [`${base}/api/admins/${encodeURIComponent(id)}`, `${base}/api/students/${encodeURIComponent(id)}`]
+          : [`${base}/api/students/${encodeURIComponent(id)}`, `${base}/api/admins/${encodeURIComponent(id)}`];
+        for (const url of endpoints) {
+          try {
+            const res = await fetch(url);
+            if (res.ok) { backendUser = await res.json(); break; }
+          } catch { /* ignore and try next */ }
+        }
       }
 
       if (backendUser && (backendUser.id || backendUser.studentId || backendUser.adminId)) {
@@ -234,35 +235,50 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     // Fetch user from shared backend DB.
-    // Route STUDENT IDs to /api/students/... first based on ID pattern, regardless of qrData.userType,
-    // then fallback to the other type. This avoids 404s when a student QR is mis-tagged as "admin".
+    // Prefer unified `/api/users/<id>` first to avoid noisy 404 probes against
+    // `/api/students/<id>` and `/api/admins/<id>` (common in mixed deployments).
     const base = API.BACKEND.BASE;
-    const looksLikeStudentId = /^KC-\d{2}-[A-Z]-\d{3,6}$/.test(qrData.userId);
-    const looksLikeAdminId = /^KCL-\d{3,6}$/.test(qrData.userId);
 
-    let endpoints: string[];
-    if (looksLikeStudentId && !looksLikeAdminId) {
-      endpoints = [
-        `${base}/api/students/${encodeURIComponent(qrData.userId)}`,
-        `${base}/api/admins/${encodeURIComponent(qrData.userId)}`,
-      ];
-    } else if (looksLikeAdminId && !looksLikeStudentId) {
-      endpoints = [
-        `${base}/api/admins/${encodeURIComponent(qrData.userId)}`,
-        `${base}/api/students/${encodeURIComponent(qrData.userId)}`,
-      ];
-    } else {
-      // Fall back to the declared type ordering if pattern is ambiguous
-      endpoints = qrData.userType === 'admin'
-        ? [`${base}/api/admins/${encodeURIComponent(qrData.userId)}`, `${base}/api/students/${encodeURIComponent(qrData.userId)}`]
-        : [`${base}/api/students/${encodeURIComponent(qrData.userId)}`, `${base}/api/admins/${encodeURIComponent(qrData.userId)}`];
-    }
     let backendUser: any = null;
-    for (const url of endpoints) {
-      try {
-        const res = await fetch(url);
-        if (res.ok) { backendUser = await res.json(); break; }
-      } catch {}
+    try {
+      const res = await fetch(`${base}/api/users/${encodeURIComponent(qrData.userId)}`);
+      if (res.ok) {
+        backendUser = await res.json();
+      }
+    } catch {}
+
+    // Legacy fallback: role-specific endpoints (kept for older deployments)
+    if (!backendUser) {
+      const looksLikeStudentId = /^KC-\d{2}-[A-Z]-\d{3,6}$/.test(qrData.userId);
+      const looksLikeAdminId = /^KCL-\d{3,6}$/.test(qrData.userId);
+
+      let endpoints: string[];
+      if (looksLikeStudentId && !looksLikeAdminId) {
+        endpoints = [
+          `${base}/api/students/${encodeURIComponent(qrData.userId)}`,
+          `${base}/api/admins/${encodeURIComponent(qrData.userId)}`,
+        ];
+      } else if (looksLikeAdminId && !looksLikeStudentId) {
+        endpoints = [
+          `${base}/api/admins/${encodeURIComponent(qrData.userId)}`,
+          `${base}/api/students/${encodeURIComponent(qrData.userId)}`,
+        ];
+      } else {
+        // Fall back to the declared type ordering if pattern is ambiguous
+        endpoints = qrData.userType === 'admin'
+          ? [`${base}/api/admins/${encodeURIComponent(qrData.userId)}`, `${base}/api/students/${encodeURIComponent(qrData.userId)}`]
+          : [`${base}/api/students/${encodeURIComponent(qrData.userId)}`, `${base}/api/admins/${encodeURIComponent(qrData.userId)}`];
+      }
+
+      for (const url of endpoints) {
+        try {
+          const res = await fetch(url);
+          if (res.ok) {
+            backendUser = await res.json();
+            break;
+          }
+        } catch {}
+      }
     }
     if (!backendUser) {
       // Fallback to local mock DB if backend user not found or DB is down

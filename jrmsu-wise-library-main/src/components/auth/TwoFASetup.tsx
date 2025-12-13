@@ -409,6 +409,15 @@ export default function TwoFASetup({
                       toast({ title: 'Password incorrect', description: 'Please check your password and try again.', variant: 'destructive' });
                       return;
                     }
+                    // Persist disable to backend too (so state survives refresh/restart)
+                    try {
+                      fetch('http://localhost:5000/api/users/2fa/disable', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ user_id: user.id, user_type: user.role }),
+                      }).catch(() => { /* noop */ });
+                    } catch {}
+
                     disableTwoFactor();
                     setTwoFactorData(null);
                     setDisablePw('');

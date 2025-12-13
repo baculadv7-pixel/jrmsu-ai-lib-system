@@ -73,6 +73,21 @@ python ai_server.py
 
 ## 📋 Recent Updates (December 2025)
 
+### Mirror QR Login & Library Sessions (8081) ✅
+
+- QR scanner on the **mirror login page** (`http://localhost:8081/`) has been hardened so that it:
+  - Stays stable after long standby periods via an internal health check that auto-restarts the camera if it silently stops.
+  - Reliably decodes JRMSU Library QR payloads using a combined **Html5Qrcode + jsQR** pipeline.
+  - Uses backend-driven session checks (`/api/library/check-session/<userId>`) to decide whether each scan should **log in or log out**, giving a clean toggle pattern:  
+    `scan → login → scan again → logout → scan again → login → …` without needing to switch to Manual Login.
+  - Fully integrates with `/api/library/login` and `/api/library/logout` so the **Active Sessions** panel and the `library_sessions` / `active_sessions` tables stay in sync.
+- Logout QR scans now treat "no active session" responses gracefully, avoiding false "Logout Failed" errors when a user is already logged out.
+- These fixes live primarily in:
+  - `mirror-login-page/src/components/qr/QRScanner.tsx`
+  - `mirror-login-page/src/components/auth/QRCodeLogin.tsx`
+  - `mirror-login-page/src/context/LibrarySessionContext.tsx`
+  - `python-backend/library_session_manager.py`
+
 ### Critical Fixes Implemented ✅
 
 #### 1. **Registration & Data Persistence**

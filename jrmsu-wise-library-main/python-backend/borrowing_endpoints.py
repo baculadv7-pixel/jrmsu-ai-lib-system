@@ -8,7 +8,11 @@ from db import get_db_cursor, execute_query
 from datetime import datetime, timedelta
 import uuid
 
-borrowing_bp = Blueprint('borrowing', __name__, url_prefix='/api/library')
+# NOTE: This module targets an older/alternate schema (books.book_id, borrow_records.student_id, etc.)
+# The main system uses DB-backed endpoints in library_endpoints.py under /api/library.
+# To avoid route conflicts (which caused /api/library/borrow-book to hit the wrong handler and 404 for new books),
+# expose these legacy endpoints under a different prefix.
+borrowing_bp = Blueprint('borrowing', __name__, url_prefix='/api/library-legacy')
 
 # ============================================================================
 # BOOK BORROWING ENDPOINT WITH FULL VALIDATION

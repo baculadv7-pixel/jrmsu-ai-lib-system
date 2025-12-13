@@ -577,29 +577,59 @@ def get_user_info(user_id: str) -> Optional[Dict]:
 def get_book_info(book_id: str) -> Optional[Dict]:
     """Look up a book in the main books table.
 
-    This ensures QR scans for books on the mirror kiosk always validate against
-    the same inventory that powers `/books` and `/book-management` in the
-    main app (8080).
+    IMPORTANT: The canonical schema in this repo uses:
+      - books.id
+      - books.total_copies / books.available_copies
+
+    Some older schemas use book_id/copies/available instead. We support both.
     """
+    row = None
+
+    # Prefer new schema first
     try:
         row = execute_query(
-            "SELECT book_id, title, author, isbn, available, copies, status FROM books WHERE book_id = %s",
+            "SELECT id, title, author, isbn, total_copies, available_copies, status FROM books WHERE id = %s",
             (book_id,),
             fetch_one=True,
         )
     except Exception:
         row = None
 
+    # Fall back to older schema if needed
+    if not row:
+        try:
+            row = execute_query(
+                "SELECT book_id, title, author, isbn, copies, available, status FROM books WHERE book_id = %s",
+                (book_id,),
+                fetch_one=True,
+            )
+        except Exception:
+            row = None
+
     if not row:
         return None
 
+    # Normalize to one shape
+    rid = row.get('id') or row.get('book_id') or book_id
+    total = row.get('total_copies') if row.get('total_copies') is not None else row.get('copies')
+    avail = row.get('available_copies') if row.get('available_copies') is not None else row.get('available')
+
+    try:
+        total_i = int(total or 0)
+    except Exception:
+        total_i = 0
+    try:
+        avail_i = int(avail or 0)
+    except Exception:
+        avail_i = 0
+
     return {
-        'id': row.get('book_id', book_id),
+        'id': rid,
         'title': row.get('title', ''),
         'author': row.get('author', ''),
         'isbn': row.get('isbn', ''),
-        'available': bool((row.get('available') or 0) > 0),
-        'copies': row.get('copies', 0),
+        'available': bool(avail_i > 0),
+        'copies': total_i,
         'status': row.get('status', 'available'),
     }
 
