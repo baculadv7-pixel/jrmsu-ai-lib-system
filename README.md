@@ -1,255 +1,264 @@
-# JRMSU AI-Library Management System
-An AI-enhanced smart library platform for **Jose Rizal Memorial State University – Katipunan Campus**.
+# readme.md
 
-**Presented by:** Jhon Mark A. Suico & Group  
-**Institution:** Jose Rizal Memorial State University – Katipunan Campus
+This file provides guidance to WARP (warp.dev) when working with code in this repository.
+``
 
----
+## Overview
 
-## Background of the Study
-Traditional library operations at JRMSU have relied on manual or semi-digital processes for user authentication, book circulation, and records management. This leads to:
+This repo hosts the JRMSU AI-Library System, a multi-service application composed of:
+- `jrmsu-wise-library-main/` – main React + TypeScript web app for students and admins, plus the primary Python backend in `python-backend/`.
+- `mirror-login-page/` – React + TypeScript app focused on library entry/exit and QR-based borrow/return.
+- `ai_server/` – Python Flask AI service that wraps a local Ollama LLaMA 3 model and uses `system_knowledge.json`.
+- `python-backend/` – standalone QR generator utility (not the main backend).
+- Root scripts and data: SQL schemas, Excel geography data, `COMPREHENSIVE_SYSTEM_CHECK.py`, startup PowerShell/batch scripts.
 
-- Inefficient tracking of active library users and sessions
-- Fragmented or inconsistent borrowing/return records
-- Limited visibility for administrators into real-time library activity
-- Manual notification workflows for overdue books and system events
-
-The **JRMSU AI-Library Management System** addresses these gaps by integrating:
-
-- QR-based authentication and identity binding
-- Two-Factor Authentication (TOTP-based 2FA) for both students and admins
-- A real-time, database-backed library entry/exit system (mirror page + backend)
-- An AI assistant backed by an LLM and curated system knowledge
-- A unified notifications and activity log system for admins and users
-
-All of these components are implemented in this repository under a multi-service architecture.
-
----
-
-## Objectives of the Study
-1. Develop an AI-enhanced library system with QR + 2FA authentication for both students and administrators.
-2. Automate book reservation, borrowing, returning, and notification workflows using a central Python backend and a mirror login page.
-3. Integrate an AI assistant that understands JRMSU library policies, supports natural-language queries, and surfaces contextual, library-specific guidance.
-4. Provide real-time dashboards and activity feeds so admins can monitor active sessions, book circulation, and system events.
-5. Improve security, auditability, and data consistency by consolidating operations on top of MySQL/MariaDB and file-backed fallbacks.
-
----
-
-## Repository Structure (High-Level)
-This repository is a multi-service system with coordinated frontends and backends.
-
-- `jrmsu-wise-library-main/` – **Main web app** (students + admins)
-  - Tech: React + TypeScript (Vite), Tailwind, ShadCN
-- `jrmsu-wise-library-main/python-backend/` – **Primary Python backend**
-  - Tech: Python, Flask, Flask-SocketIO, MySQL/MariaDB
-- `mirror-login-page/` – **Mirror login page** (library entry/exit + QR borrow/return)
-  - Tech: React + TypeScript (Vite), Tailwind, QR scanner UI
-- `ai_server/` – **AI server**
-  - Tech: Python + Flask, LLM via Ollama, curated knowledge base
-- `DesktopappLibrary/` – **Desktop app wrapper**
-  - Tech: Electron (wraps the web UI)
-- `python-backend/` (repo root) – utilities (example: QR generator scripts)
-
----
-
-## Scope, Users, and Limitations
-
-### Scope
-Major subsystems:
-
-- **Main Web Application (Admin + Student Portal)**  
-  Path: `jrmsu-wise-library-main/`
-  - Book management and inventory: `src/pages/BookManagement.tsx`, `src/services/books.ts`
-  - Borrow and reservation views: `src/pages/Books.tsx`
-  - Dashboards and reports: `src/pages/Dashboard.tsx`, `src/pages/Reports.tsx`
-  - Notifications: `src/services/notifications.ts`, `src/services/notificationsApi.ts`
-  - 2FA setup and verification: `src/components/auth/TwoFASetup.tsx`, `src/context/AuthContext.tsx`
-
-- **Python Backend (Core API + Auth + Library Integration)**  
-  Path: `jrmsu-wise-library-main/python-backend/`
-  - `app.py` – main Flask app (CORS, Socket.IO, users/admin/students, backups, audit, etc.)
-  - `library_endpoints.py` – DB-backed reservation, borrow, return, user-status endpoints
-  - `library_session_manager.py` – library login/logout and active session tracking
-  - `notifications_routes.py` / `notifications_service.py` – notifications + activity log
-  - `notification_endpoints.py` – overdue notifications and preferences
-
-- **Mirror Login Page (Library Entry/Exit + QR Borrow/Return)**  
-  Path: `mirror-login-page/`
-  - Mirror UI: `src/pages/LibraryEntry.tsx`
-  - Session context (calls `/api/library/*`): `src/context/LibrarySessionContext.tsx`
-
-- **AI Server**  
-  Path: `ai_server/`
-  - `ai_server/app.py` – AI HTTP endpoints
-  - `ai_server/system_knowledge.json` – JRMSU Library knowledge base
-
-- **Desktop App (Electron Wrapper)**  
-  Path: `DesktopappLibrary/`
-  - `main.js` – Electron main process
-  - Uses the same backend at `http://localhost:5000`
-
-### Users
-- **Students**
-  - Register, manage profile, generate/download QR
-  - Reserve, borrow, and return books
-  - Receive notifications (borrow/return, overdue, password reset)
-
-- **Library Administrators**
-  - Manage books and users
-  - Monitor dashboards, activity logs, active sessions, and reports
-  - Use/enforce 2FA for high-privilege accounts
-
-### Limitations
-- Some features require **MySQL/MariaDB**. When DB is unavailable, some modules fall back to a file-backed store (`jrmsu-wise-library-main/python-backend/data.json`) for development only.
-- The AI assistant depends on an external LLM endpoint (Ollama by default). If unavailable, AI features will fail or degrade.
-
----
-
-## Technologies Used
-
-### Frontend
-- React 18 + TypeScript
-- Vite
-- Tailwind CSS + ShadCN UI
-- React Router
-- React Query (`@tanstack/react-query`)
-- Socket.IO client (realtime dashboards & notifications)
-
-### Backend
-- Python + Flask
-- Flask-SocketIO
-- MySQL/MariaDB
-
-### AI Module
-- Python Flask AI server (`ai_server/app.py`)
-- Ollama (local LLM runtime)
-- Knowledge base: `ai_server/system_knowledge.json`
-
----
-
-## Ports / URLs
-Default local URLs:
-
+Primary ports (from `ENVIRONMENT.README.md` and `RUNSYSTEM.txt`):
 - Main frontend: `http://localhost:8080`
-- Mirror login page: `http://localhost:8081`
-- Python backend: `http://localhost:5000`
+- Mirror frontend: `http://localhost:8081`
+- Python backend API: `http://localhost:5000`
 - AI server: `http://localhost:5002`
-- Ollama: `http://localhost:11434`
+- Ollama model server: `http://localhost:11434`
 
----
+## Common commands
 
-## Install Guide (Windows)
+All commands assume the repo root is `C:\Users\provu\Desktop\jrmsu-ai-lib-system-main` and are written for PowerShell.
 
-### 1) Required Software
-- **Node.js** (LTS recommended)
-- **Python 3.10+**
-- **MySQL/MariaDB** (commonly via XAMPP)
-- **Ollama** (for AI features)
+### Start everything manually (recommended for debugging)
 
-Make sure `node`, `npm`, `python`, and `pip` are available in your PATH.
+Use separate terminals for clear logs.
 
-### 2) Database Setup (MySQL / MariaDB)
-1. Create database: `jrmsu_library`
-2. Import schema SQL (repo root and backend SQL files), for example:
-   - `create_library_tables.sql`
-   - `jrmsu-wise-library-main/python-backend/database/library_schema.sql`
+- Python backend (Flask API, port 5000):
+  - `cd jrmsu-wise-library-main/python-backend`
+  - `. .venv\Scripts\Activate.ps1`
+  - `python app.py`
 
-> Use the same credentials that `jrmsu-wise-library-main/python-backend/db.py` expects.
+- Main frontend (React, port 8080):
+  - `cd jrmsu-wise-library-main`
+  - `npm run dev`
 
-### 3) Python Backend Dependencies
-From repo root:
+- Mirror frontend (React, port 8081):
+  - `cd mirror-login-page`
+  - `npm run dev`
 
-```powershell
-cd "jrmsu-wise-library-main/python-backend"
-python -m venv .venv
-. .venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-```
+- AI server (Flask, port 5002):
+  - `cd ai_server`
+  - `. .venv\Scripts\Activate.ps1`
+  - `python app.py`
 
-### 4) Main Frontend Dependencies
+- Ollama (model server, port 11434):
+  - `ollama serve`
 
-```powershell
-cd "jrmsu-wise-library-main"
-npm install
-```
+### One-shot startup scripts (all services)
 
-### 5) Mirror Frontend Dependencies
+From the repo root:
+- `powershell -ExecutionPolicy Bypass -File .\Start-All-Enforced.ps1`
+  - or `powershell -ExecutionPolicy Bypass -File .\run_all_enforced.ps1`
 
-```powershell
-cd "mirror-login-page"
-npm install
-```
+These scripts free ports 8080, 8081, 5000, 5002, 11434 and then start:
+- Python backend (`jrmsu-wise-library-main/python-backend/app.py`)
+- Main frontend (`jrmsu-wise-library-main`, `npm run dev`)
+- Mirror frontend (`mirror-login-page`, `npm run dev`)
+- AI server (`ai_server/app.py`)
+- Ollama (`ollama serve`)
 
-### 6) AI Server Dependencies (Optional)
+You can alternatively double‑click `Start-All-Enforced.ps1`, `run_all_enforced.ps1`, or `Start_all_system.bat` from File Explorer.
 
-```powershell
-cd "ai_server"
-python -m venv .venv
-. .venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install flask requests mysql-connector-python textblob
-```
+### Frontend: build, lint, and tests
 
-Then install and start Ollama:
+The main app and mirror app share the same script structure.
 
-```powershell
-ollama serve
-ollama pull llama3:8b-instruct-q4_K_M
-```
+- Main app (`jrmsu-wise-library-main/`):
+  - Install deps: `cd jrmsu-wise-library-main && npm install`
+  - Build: `npm run build`
+  - Lint: `npm run lint`
+  - Run test suite (Vitest): `npm test`
+  - Run tests in watch mode: `npm run test:watch`
+  - Run a single test file (Vitest convention): `npm test -- path/to/file.test.tsx`
 
----
+- Mirror app (`mirror-login-page/`):
+  - Install deps: `cd mirror-login-page && npm install`
+  - Build: `npm run build`
+  - Lint: `npm run lint`
+  - Run test suite: `npm test`
+  - Watch tests: `npm run test:watch`
+  - Single test file: `npm test -- path/to/file.test.tsx`
 
-## How to Run
+### Python backend: environment and run
 
-### 1) Start the Python Backend (Port 5000)
+Backend lives in `jrmsu-wise-library-main/python-backend` (see its `README.md`):
 
-```powershell
-cd "jrmsu-wise-library-main/python-backend"
-. .venv\Scripts\Activate.ps1
-python app.py
-```
+- Create venv and install dependencies:
+  - `cd jrmsu-wise-library-main/python-backend`
+  - `python -m venv .venv`
+  - `. .venv\Scripts\Activate.ps1`
+  - `pip install --upgrade pip`
+  - `pip install -r requirements.txt`
 
-### 2) Start the Main Web App (Port 8080)
+- Run backend:
+  - `. .venv\Scripts\Activate.ps1`
+  - `python app.py`
 
-```powershell
-cd "jrmsu-wise-library-main"
-npm run dev
-```
+Key requirements (from `requirements.txt` and docs):
+- `flask`, `flask-socketio`, `mysql-connector-python`, `bcrypt`, `pyotp`, `requests`, `bleach`, `Pillow`, `openpyxl`.
 
-### 3) Start the Mirror Login Page (Port 8081)
+Database expectations:
+- MySQL/MariaDB database `jrmsu_library` created from `create_library_tables.sql` (root) plus `notifications_schema.sql` and other SQL files in `python-backend/`.
+- Connection settings controlled via `db.py` and environment variables (e.g. `DB_HOST`, `DB_USER`, `DB_PASSWORD`, `DB_NAME`).
 
-```powershell
-cd "mirror-login-page"
-npm run dev
-```
+### AI server: environment and run
 
-### 4) Start the AI Server (Port 5002) (Optional)
+AI service lives in `ai_server/` (see `ai_server/app.py` and `ENVIRONMENT.README.md`).
 
-```powershell
-cd "ai_server"
-. .venv\Scripts\Activate.ps1
-python app.py
-```
+- Create venv and install dependencies:
+  - `cd ai_server`
+  - `python -m venv .venv`
+  - `. .venv\Scripts\Activate.ps1`
+  - `pip install --upgrade pip`
+  - `pip install flask requests mysql-connector-python textblob`
 
----
+- Ensure Ollama is installed and model pulled:
+  - `ollama serve`
+  - `ollama pull llama3:8b-instruct-q4_K_M`
 
-## End-to-End Flow Summary
-- Users register/login (manual or QR) on the main site.
-- Mirror page manages library entry/exit sessions and triggers borrow/return via QR scanning.
-- Core circulation is stored in MySQL tables:
-  - `books`, `reservations`, `borrow_records`
-- Realtime updates are delivered via Socket.IO:
-  - Dashboard events (book added/borrowed/returned)
-  - Notification events (notification.new, notification.update)
+- Run AI server:
+  - `. .venv\Scripts\Activate.ps1`
+  - `python app.py`
 
----
+Configuration notes:
+- `ai_server/app.py` binds to port `5002` and talks to Ollama at `http://127.0.0.1:11434` (hard‑coded `OLLAMA_URL`).
+- Optional `LIBRARY_API_BASE` env var points to the Python backend (default `http://localhost:5000`).
+- Optional MySQL logging DB `library_system_ai` is used if `mysql-connector-python` is available.
 
-## Acknowledgment
-Special thanks to the JRMSU Katipunan Campus stakeholders who supported requirements and validation.
+### Root QR generator utility
 
-Development team:
-- **Jhon Mark Suico** – Team Leader & System Engineer
-- **Jhon Ernie Alimpong** – System Architect
-- **Vivien Punay** – Product Manager
-- **Lenny Mambo** – Data Analyst
+The root `python-backend/` folder is a small utility for generating QR codes with an embedded logo:
+- Script: `python-backend/generate_qr_with_logo.py`
+- Dependencies: `qrcode[pil]`, `Pillow` (install with `pip install qrcode[pil] Pillow`).
+
+Example usage (from its docstring and `ENVIRONMENT.README.md`):
+- `cd python-backend`
+- `python generate_qr_with_logo.py --data '{"systemId":"JRMSU-LIBRARY"}' --logo "..\jrmsu-wise-library-main\src\assets\<logo>.png" --out qr.png`
+
+### System health check
+
+From the repo root:
+- `python COMPREHENSIVE_SYSTEM_CHECK.py`
+
+This script verifies MySQL connectivity, required DBs/tables, service health on ports 5000/5002/8080/8081, Ollama availability, and presence of key `.env` files and Python modules.
+
+## High-level architecture
+
+### 1. Frontends (React + TypeScript)
+
+Both frontends use the same stack (Vite, React 18, TypeScript, Tailwind, shadcn-ui, Socket.IO client, QR libraries).
+
+- Main app (`jrmsu-wise-library-main/src`):
+  - `main.tsx` boots React, React Router, React Query, and wraps the app in `AuthProvider`.
+  - `App.tsx` defines the router and global layout (navbar, side navigation, AI assistant shell, toasts).
+  - `pages/` contains feature pages (login/registration, dashboard, books, book management, reports, profile, etc.).
+  - `context/` contains shared state:
+    - `AuthContext.tsx` – authentication, user session, QR login support, 2FA flows, auto‑logout behavior.
+    - Other contexts (e.g. registration) that coordinate multi‑step flows.
+  - `services/` wraps backend APIs and local models:
+    - `books`, `reservations`, `dashboardApi`, `stats`, `activity`, `notifications`, `notificationsApi`, `notificationManager`, and AI integration services.
+  - `components/` hosts UI building blocks (layout, tables, dialogs, QR components, AI assistant UI, etc.).
+
+- Mirror app (`mirror-login-page/src`):
+  - `main.tsx` and `App.tsx` provide a slim router that primarily serves `pages/LibraryEntry.tsx`.
+  - `pages/LibraryEntry.tsx` orchestrates:
+    - Manual and QR login via shared `AuthContext` logic.
+    - Creation and termination of library sessions using `LibrarySessionContext`.
+    - Prompts and dialogs for picking up reserved books or returning borrowed books.
+    - QR scanner dialog used during borrow/return flows.
+  - `context/LibrarySessionContext.tsx` wraps `/api/library/*` endpoints from the Python backend, maintaining the active session, and exposing `createSession`, `endSession`, `checkUserStatus`, `borrowBook`, `returnBook`, and related helpers.
+
+Key pattern: frontends call Python backend endpoints (under `/api/...`) via these service/ context layers, so any behavior changes typically involve coordinated edits in `src/services`, `src/context`, and the corresponding Python route implementations.
+
+### 2. Python backend (`jrmsu-wise-library-main/python-backend`)
+
+This is the core business logic service (Flask + Flask-SocketIO):
+
+- `app.py`:
+  - Configures Flask app, Socket.IO server, CORS (allowing ports 8080 and 8081), and DB connections via `db.py`.
+  - Exposes routes for admin/student/user management, authentication, 2FA, backups, audit logs, and system metadata.
+  - Integrates library session routes and notifications by importing and registering `library_session_manager` and `notifications_routes`.
+  - Provides file‑backed JSON fallbacks (`data.json`) for development when MySQL is unavailable.
+
+- `db.py`:
+  - Centralizes connection handling to the `jrmsu_library` database.
+  - Offers helper functions (`execute_query`, repository‑style helpers like `StudentDB`, `AdminDB`) used throughout the backend.
+
+- `library_endpoints.py`:
+  - Implements core library flows, including:
+    - Reservation endpoints (`/api/library/reserve-book`, `/api/library/cancel-reservation`, user/admin reservation queries).
+    - Borrow/return routes (`/api/library/borrow-book`, `/api/library/return-book`, `/api/library/activate-return-time`).
+    - Status endpoints (`/api/library/user-status/<user_id>`, borrow/reservation lists per user or global).
+  - Maintains `books`, `reservations`, and `borrow_records` tables; updates availability and status fields.
+  - Emits notifications and realtime dashboard events via helpers like `_notify_all_admins` and `_broadcast`.
+
+- `library_session_manager.py`:
+  - Ensures and uses the `library_sessions`, `active_sessions`, and `activity_log` tables.
+  - Defines the session lifecycle endpoints (`/api/library/login`, `/api/library/logout`, `/api/library/force-logout`, `/api/library/check-session/<user_id>`, `/api/library/active-sessions`, `/api/library/forgotten-logouts`).
+  - Logs structured activity and uses notification services to inform admins on library login/logout and forgotten logouts.
+
+- `notifications_service.py` and `notifications_routes.py`:
+  - Manage the `notifications` and DB‑backed `activity_log` tables.
+  - Provide API routes for listing/marking notifications and for fetching recent activity used by the dashboard.
+  - Encapsulate higher‑level helpers like `notify_all_admins`, `notify_user`, and `log_activity` that unify how events are surfaced to admins.
+
+- `notification_endpoints.py`:
+  - Implements email/SMS/push flows for overdue books and notification preferences.
+  - Integrates with `NotificationsService` so overdue operations also appear in the in‑app notification bell and activity log.
+
+Most cross‑cutting library logic flows through these three modules: `library_endpoints.py`, `library_session_manager.py`, and the notifications service/routes. When changing behavior for library check‑in/out, reservations, or admin visibility, update both the backend functions and the corresponding frontend services/contexts.
+
+### 3. AI server (`ai_server/`)
+
+The AI server is intentionally isolated from the main backend:
+
+- `app.py`:
+  - Runs a Flask app on port 5002 with permissive CORS so both frontends can call it.
+  - Loads and sanitizes `system_knowledge.json` at startup into in‑memory structures (`SYSTEM_KNOWLEDGE`, `SYSTEM_TOPICS`).
+  - For each user query, builds a composed prompt that includes:
+    - A fixed Jose system prompt (short, library‑focused answers).
+    - Relevant slices from `system_knowledge.json` based on keyword matching.
+    - Optional catalog context fetched from the main backend (e.g. `/api/ai/book-context`).
+  - Calls Ollama via `subprocess.run(["ollama", "run", "llama3:8b-instruct-q4_K_M"], ...)` and returns the streamed answer.
+  - Optionally logs interactions to a `library_system_ai` MySQL database if `mysql-connector-python` is installed.
+  - Provides health and control endpoints such as `/ai/health` and `/ai/quit`.
+
+Frontend AI components (`AIAssistant` and related services in `jrmsu-wise-library-main/src/services`) call these endpoints; they do not talk directly to Ollama.
+
+### 4. Root scripts and support files
+
+- `ENVIRONMENT.README.md`:
+  - Canonical reference for global installation requirements (Node, Python, MySQL/XAMPP, Ollama) and per‑service setup.
+  - Summarizes how to start each service and how to run the system check script.
+
+- `RUNSYSTEM.txt`:
+  - Focused "how to run" guide for Windows, outlining manual startup, PowerShell startup scripts, and port‑freeing snippets.
+
+- `COMPREHENSIVE_SYSTEM_CHECK.py`:
+  - Orchestrates end‑to‑end environment validation: DB, backend, frontends, AI server, Ollama, and presence of required configs.
+
+- `scripts/check_mmd.py`:
+  - Utility to validate the `flowchart.mmd` Mermaid diagram for quote/parenthesis balance and certain syntax patterns.
+
+- Design documents (`READMEONE.md`, `READMETWO.md`, `READMETHREE.md`, `READMEFOUR.md`, `READMEFIVE.md`, `Design and command.txt`):
+  - Describe the conceptual and visual design, detailed code map, and a full system flowchart for the JRMSU AI‑Library System.
+  - When making structural changes, cross‑check whether they stay consistent with these documents.
+
+## How to approach changes
+
+- For **UI/UX changes** in the main system, start from `jrmsu-wise-library-main/src/pages` and follow into `components/`, `context/`, and `services/`.
+- For **library behavior** (reservations, borrowing, returning, sessions), coordinate edits between:
+  - Mirror app (`mirror-login-page/src/pages/LibraryEntry.tsx` and `context/LibrarySessionContext.tsx`).
+  - Main app books/dashboard pages and services.
+  - Python backend modules: `library_endpoints.py`, `library_session_manager.py`, `notifications_service.py`, `notifications_routes.py`.
+- For **notifications and activity logs**, work primarily in `notifications_service.py`, `notifications_routes.py`, and the frontend notification services and navbar.
+- For **AI behavior**, adjust:
+  - Prompting and control flow in `ai_server/app.py`.
+  - Domain knowledge in `ai_server/system_knowledge.json`.
+  - Frontend integration in the AI assistant components and services.
+
+Keeping these boundaries in mind will help future Warp instances locate the right layer quickly and avoid making changes in the wrong service.
